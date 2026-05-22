@@ -21,6 +21,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private static readonly Brush HealthWarningForeground = new SolidColorBrush(Color.FromRgb(120, 53, 15));
     private static readonly Brush HealthMonitoringBackground = new SolidColorBrush(Color.FromRgb(219, 234, 254));
     private static readonly Brush HealthMonitoringForeground = new SolidColorBrush(Color.FromRgb(30, 64, 175));
+    private static readonly Brush FlowActiveBrush = new SolidColorBrush(Color.FromRgb(22, 163, 74));
+    private static readonly Brush FlowIdleBrush = new SolidColorBrush(Color.FromRgb(209, 213, 219));
 
     private readonly SchedulerService _scheduler = new();
     private SchedulerService? _preemptionTestScheduler;
@@ -50,6 +52,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private string _preemptionHealthDescription = "데모를 시작하면 선점 상태를 분석합니다.";
     private Brush _preemptionHealthBadgeBackground = HealthStoppedBackground;
     private Brush _preemptionHealthBadgeForeground = HealthStoppedForeground;
+    private string _preemptionFlowHeadline = "데모를 시작하면 선점 흐름을 단계별로 표시합니다.";
+    private string _preemptionFlowDetail = "LOW 작업, HIGH 실행 가능, LOW 양보, HIGH 선실행 순서를 자동으로 추적합니다.";
+    private Brush _preemptionLowStepBrush = FlowIdleBrush;
+    private Brush _preemptionYieldStepBrush = FlowIdleBrush;
+    private Brush _preemptionHighStepBrush = FlowIdleBrush;
+    private long _lastLowWorkTick;
+    private long _lastYieldTick;
+    private long _lastHighRunTick;
 
     public MainWindowViewModel()
     {
@@ -227,6 +237,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public int PreemptionLowTaskCount => 1;
+    public int PreemptionHighTaskCount => 1;
+    public string PreemptionLowTaskName => "Low Priority Worker";
+    public string PreemptionHighTaskName => "High Priority Urgent";
+
     public string PreemptionHealthLabel
     {
         get => _preemptionHealthLabel;
@@ -284,6 +299,81 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
             _preemptionHealthBadgeForeground = value;
             OnPropertyChanged(nameof(PreemptionHealthBadgeForeground));
+        }
+    }
+
+    public string PreemptionFlowHeadline
+    {
+        get => _preemptionFlowHeadline;
+        private set
+        {
+            if (_preemptionFlowHeadline == value)
+            {
+                return;
+            }
+
+            _preemptionFlowHeadline = value;
+            OnPropertyChanged(nameof(PreemptionFlowHeadline));
+        }
+    }
+
+    public string PreemptionFlowDetail
+    {
+        get => _preemptionFlowDetail;
+        private set
+        {
+            if (_preemptionFlowDetail == value)
+            {
+                return;
+            }
+
+            _preemptionFlowDetail = value;
+            OnPropertyChanged(nameof(PreemptionFlowDetail));
+        }
+    }
+
+    public Brush PreemptionLowStepBrush
+    {
+        get => _preemptionLowStepBrush;
+        private set
+        {
+            if (ReferenceEquals(_preemptionLowStepBrush, value))
+            {
+                return;
+            }
+
+            _preemptionLowStepBrush = value;
+            OnPropertyChanged(nameof(PreemptionLowStepBrush));
+        }
+    }
+
+    public Brush PreemptionYieldStepBrush
+    {
+        get => _preemptionYieldStepBrush;
+        private set
+        {
+            if (ReferenceEquals(_preemptionYieldStepBrush, value))
+            {
+                return;
+            }
+
+            _preemptionYieldStepBrush = value;
+            OnPropertyChanged(nameof(PreemptionYieldStepBrush));
+        }
+    }
+
+    public Brush PreemptionHighStepBrush
+    {
+        get => _preemptionHighStepBrush;
+        private set
+        {
+            if (ReferenceEquals(_preemptionHighStepBrush, value))
+            {
+                return;
+            }
+
+            _preemptionHighStepBrush = value;
+            OnPropertyChanged(nameof(PreemptionHighStepBrush));
         }
     }
 
@@ -355,6 +445,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         Interlocked.Exchange(ref _preemptionLowWorkUnitsCounter, 0);
         Interlocked.Exchange(ref _preemptionHighRunCountCounter, 0);
         Interlocked.Exchange(ref _preemptionYieldCountCounter, 0);
+        Interlocked.Exchange(ref _lastLowWorkTick, 0);
+        Interlocked.Exchange(ref _lastYieldTick, 0);
+        Interlocked.Exchange(ref _lastHighRunTick, 0);
         _lastTrendSecond = DateTime.MinValue;
         _lastYieldTotalForTrend = 0;
 
@@ -363,7 +456,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             PreemptionLogs.Clear();
             PreemptionYieldTrend.Clear();
             PreemptionTestState = "Running";
-            LastPreemptionEvent = "Starting cooperative preemption demo...";
+            LastPreemptionEvent = "데모 시작: Low 1개, High 1개 구성으로 협력형 선점을 관찰합니다.";
             PreemptionLowWorkUnits = 0;
             PreemptionHighRunCount = 0;
             PreemptionYieldCount = 0;
@@ -373,6 +466,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 description: "데모를 시작했고, 첫 실행 데이터를 수집 중입니다.",
                 background: HealthMonitoringBackground,
                 foreground: HealthMonitoringForeground);
+            SetPreemptionFlow(
+                headline: "초기화 중",
+                detail: "첫 실행 이벤트를 기다리는 중입니다.",
+                lowStep: false,
+                yieldStep: false,
+                highStep: false);
             _preemptionUiTimer.Start();
             RefreshCommandStates();
         });
@@ -393,13 +492,16 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             Enum_TaskExecutionMode.Periodic,
             async (context, cancellationToken) =>
             {
+                Interlocked.Exchange(ref _lastLowWorkTick, DateTime.UtcNow.Ticks);
+
                 for (var i = 0; i < 120; i++)
                 {
                     if (context.ShouldYield())
                     {
                         Interlocked.Increment(ref _preemptionYieldCountCounter);
+                        Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
                         await _dispatcher.InvokeAsync(() =>
-                            AppendPreemptionLog("Low task yielded to higher-priority runnable task.")).Task.ConfigureAwait(false);
+                            AppendPreemptionLog("Low Priority Worker가 ShouldYield()=true를 감지해 양보했습니다. 다음 tick에서 High Priority Urgent가 먼저 실행됩니다.")).Task.ConfigureAwait(false);
                         return;
                     }
 
@@ -408,7 +510,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 }
 
                 await _dispatcher.InvokeAsync(() =>
-                    AppendPreemptionLog("Low task completed one work slice.")).Task.ConfigureAwait(false);
+                    AppendPreemptionLog("Low Priority Worker가 작업 슬라이스 1회를 완료했습니다.")).Task.ConfigureAwait(false);
             },
             statusProvider: () => "Long-running low priority worker",
             overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay));
@@ -421,8 +523,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             (_, _) =>
             {
                 var count = Interlocked.Increment(ref _preemptionHighRunCountCounter);
+                Interlocked.Exchange(ref _lastHighRunTick, DateTime.UtcNow.Ticks);
                 _ = _dispatcher.BeginInvoke(() =>
-                    AppendPreemptionLog($"High task ran immediately. Count={count}"));
+                    AppendPreemptionLog($"High Priority Urgent 실행 완료. 누적 실행 횟수={count}"));
                 return Task.CompletedTask;
             },
             statusProvider: () => "Urgent high-priority work"));
@@ -462,6 +565,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                     description: "데모가 중지되어 상태 분석을 멈췄습니다.",
                     background: HealthStoppedBackground,
                     foreground: HealthStoppedForeground);
+                SetPreemptionFlow(
+                    headline: "중지",
+                    detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
+                    lowStep: false,
+                    yieldStep: false,
+                    highStep: false);
                 RefreshCommandStates();
             }
             else
@@ -476,6 +585,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                         description: "데모가 중지되어 상태 분석을 멈췄습니다.",
                         background: HealthStoppedBackground,
                         foreground: HealthStoppedForeground);
+                    SetPreemptionFlow(
+                        headline: "중지",
+                        detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
+                        lowStep: false,
+                        yieldStep: false,
+                        highStep: false);
                     RefreshCommandStates();
                 });
             }
@@ -488,6 +603,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         PreemptionHighRunCount = Volatile.Read(ref _preemptionHighRunCountCounter);
         PreemptionYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
         UpdatePreemptionHealthStatus();
+        UpdatePreemptionFlowStatus();
 
         var nowSecond = DateTime.Now;
         nowSecond = new DateTime(
@@ -590,6 +706,85 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         PreemptionHealthDescription = description;
         PreemptionHealthBadgeBackground = background;
         PreemptionHealthBadgeForeground = foreground;
+    }
+
+    private void UpdatePreemptionFlowStatus()
+    {
+        if (!_isPreemptionTestRunning)
+        {
+            SetPreemptionFlow(
+                headline: "중지",
+                detail: "데모 시작 후 단계 신호가 켜집니다.",
+                lowStep: false,
+                yieldStep: false,
+                highStep: false);
+            return;
+        }
+
+        var nowTicks = DateTime.UtcNow.Ticks;
+        var lowRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastLowWorkTick), TimeSpan.FromMilliseconds(900));
+        var yieldRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastYieldTick), TimeSpan.FromMilliseconds(900));
+        var highRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastHighRunTick), TimeSpan.FromMilliseconds(900));
+
+        if (yieldRecent && highRecent)
+        {
+            SetPreemptionFlow(
+                headline: "선점 성립",
+                detail: "LOW가 양보했고 HIGH가 즉시 선실행되었습니다.",
+                lowStep: true,
+                yieldStep: true,
+                highStep: true);
+            return;
+        }
+
+        if (highRecent)
+        {
+            SetPreemptionFlow(
+                headline: "HIGH 우선 실행 구간",
+                detail: "현재 HIGH 태스크가 CPU를 우선 사용 중입니다.",
+                lowStep: false,
+                yieldStep: false,
+                highStep: true);
+            return;
+        }
+
+        if (lowRecent)
+        {
+            SetPreemptionFlow(
+                headline: "LOW 작업 진행 중",
+                detail: "LOW가 작업 중이며 HIGH runnable 신호를 대기하고 있습니다.",
+                lowStep: true,
+                yieldStep: false,
+                highStep: false);
+            return;
+        }
+
+        SetPreemptionFlow(
+            headline: "다음 주기 대기",
+            detail: "현재는 다음 주기 실행을 기다리는 구간입니다.",
+            lowStep: false,
+            yieldStep: false,
+            highStep: false);
+    }
+
+    private void SetPreemptionFlow(string headline, string detail, bool lowStep, bool yieldStep, bool highStep)
+    {
+        PreemptionFlowHeadline = headline;
+        PreemptionFlowDetail = detail;
+        PreemptionLowStepBrush = lowStep ? FlowActiveBrush : FlowIdleBrush;
+        PreemptionYieldStepBrush = yieldStep ? FlowActiveBrush : FlowIdleBrush;
+        PreemptionHighStepBrush = highStep ? FlowActiveBrush : FlowIdleBrush;
+    }
+
+    private static bool IsRecentTick(long nowTicks, long targetTicks, TimeSpan threshold)
+    {
+        if (targetTicks <= 0)
+        {
+            return false;
+        }
+
+        var elapsedTicks = nowTicks - targetTicks;
+        return elapsedTicks >= 0 && elapsedTicks <= threshold.Ticks;
     }
 
     private void OnSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)

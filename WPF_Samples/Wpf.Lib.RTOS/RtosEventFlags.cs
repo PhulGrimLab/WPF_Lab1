@@ -1,5 +1,8 @@
 namespace Wpf.Lib.RTOS;
 
+/// <summary>
+/// 비트 플래그 기반 이벤트 동기화를 제공하는 primitive입니다.
+/// </summary>
 public sealed class RtosEventFlags : IDisposable
 {
     private readonly object _syncRoot = new();
@@ -7,6 +10,9 @@ public sealed class RtosEventFlags : IDisposable
     private uint _flags;
     private int _isDisposed;
 
+    /// <summary>
+    /// 현재 set된 플래그 비트 값입니다.
+    /// </summary>
     public uint CurrentFlags
     {
         get
@@ -20,6 +26,10 @@ public sealed class RtosEventFlags : IDisposable
         }
     }
 
+    /// <summary>
+    /// 지정 비트를 set하고 대기 중 요청을 평가합니다.
+    /// </summary>
+    /// <param name="flags">set할 비트 마스크입니다.</param>
     public void Set(uint flags)
     {
         ThrowIfDisposed();
@@ -43,6 +53,10 @@ public sealed class RtosEventFlags : IDisposable
         }
     }
 
+    /// <summary>
+    /// 지정 비트를 clear합니다.
+    /// </summary>
+    /// <param name="flags">clear할 비트 마스크입니다.</param>
     public void Clear(uint flags)
     {
         ThrowIfDisposed();
@@ -53,18 +67,29 @@ public sealed class RtosEventFlags : IDisposable
         }
     }
 
+    /// <summary>
+    /// 요청 비트 중 하나라도 set될 때까지 대기합니다.
+    /// </summary>
+    /// <returns>매칭된 비트 마스크를 반환합니다.</returns>
     public Task<uint> WaitAnyAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         return WaitAsync(flags, waitAll: false, autoClear, timeout, cancellationToken);
     }
 
+    /// <summary>
+    /// 요청 비트가 모두 set될 때까지 대기합니다.
+    /// </summary>
+    /// <returns>매칭된 비트 마스크를 반환합니다.</returns>
     public Task<uint> WaitAllAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         return WaitAsync(flags, waitAll: true, autoClear, timeout, cancellationToken);
     }
 
+    /// <summary>
+    /// 대기 중 요청을 정리하고 리소스를 해제합니다.
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
@@ -118,6 +143,7 @@ public sealed class RtosEventFlags : IDisposable
                     _flags &= ~matched;
                 }
 
+                // 이미 조건이 충족된 경우 waiter를 만들지 않고 즉시 완료한다.
                 return Task.FromResult(matched);
             }
 
@@ -131,6 +157,7 @@ public sealed class RtosEventFlags : IDisposable
 
     private void CompleteMatchingWaiters(List<WaitRequest> completed)
     {
+        // waiter를 뒤에서부터 순회하면 RemoveAt 시 인덱스 보정이 단순해진다.
         for (var index = _waiters.Count - 1; index >= 0; index--)
         {
             var waiter = _waiters[index];
@@ -209,6 +236,8 @@ public sealed class RtosEventFlags : IDisposable
 
             if (timeout != Timeout.InfiniteTimeSpan)
             {
+                // timeout용 취소 토큰과 외부 cancellation 토큰을 분리해
+                // timeout/cancellation/dispose 원인을 명확히 구분한다.
                 _timeoutCts = new CancellationTokenSource();
                 _timeoutRegistration = _timeoutCts.Token.Register(static state =>
                 {

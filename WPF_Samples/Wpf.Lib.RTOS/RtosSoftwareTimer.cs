@@ -1,5 +1,8 @@
 namespace Wpf.Lib.RTOS;
 
+/// <summary>
+/// Task.Delay 기반 소프트웨어 타이머입니다.
+/// </summary>
 public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
 {
     private readonly Func<CancellationToken, Task> _callback;
@@ -9,6 +12,12 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     private CancellationTokenSource? _cts;
     private Task? _runTask;
 
+    /// <summary>
+    /// 타이머를 생성합니다.
+    /// </summary>
+    /// <param name="period">주기(또는 one-shot 지연 시간)입니다.</param>
+    /// <param name="isPeriodic">true면 반복 타이머, false면 one-shot입니다.</param>
+    /// <param name="callback">주기마다 호출할 콜백입니다.</param>
     public RtosSoftwareTimer(TimeSpan period, bool isPeriodic, Func<CancellationToken, Task> callback)
     {
         if (period <= TimeSpan.Zero)
@@ -21,6 +30,9 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         _callback = callback ?? throw new ArgumentNullException(nameof(callback));
     }
 
+    /// <summary>
+    /// 타이머가 실행 중이면 true입니다.
+    /// </summary>
     public bool IsRunning
     {
         get
@@ -32,8 +44,14 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// 콜백 실행 중 예외가 발생하면 전달됩니다.
+    /// </summary>
     public event EventHandler<Exception>? TimerError;
 
+    /// <summary>
+    /// 타이머를 시작합니다.
+    /// </summary>
     public void Start()
     {
         lock (_syncRoot)
@@ -48,6 +66,9 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// 타이머 중지를 요청하고 실행 중 루프 종료를 기다립니다.
+    /// </summary>
     public async Task StopAsync()
     {
         CancellationTokenSource? cts;
@@ -77,6 +98,9 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         cts?.Dispose();
     }
 
+    /// <summary>
+    /// 동기 dispose 경로입니다.
+    /// </summary>
     public void Dispose()
     {
         CancellationTokenSource? cts;
@@ -94,6 +118,9 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         DisposeCancellationSourceWhenStopped(runTask, cts);
     }
 
+    /// <summary>
+    /// 비동기 dispose 경로입니다.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);

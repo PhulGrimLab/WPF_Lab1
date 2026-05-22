@@ -169,3 +169,37 @@ Scheduler snapshot contains runtime statistics
 `SchedulerService.TraceLog`는 태스크 등록, 시작, 완료, 실패 같은 실행 흔적을 보관합니다.
 
 `ScheduledTaskSnapshot`에는 실행시간 통계와 deadline miss count가 추가되었습니다.
+
+---
+
+## 기능별로 어떤 테스트를 먼저 보면 좋은가
+
+초보자에게는 "기능 -> 테스트" 매핑으로 보는 것이 가장 이해가 빠릅니다.
+
+1. 스케줄러 기본 동작
+- Scheduler executes periodic task
+- Scheduler runs higher priority task first
+- Scheduler executes one-shot task once
+
+2. 종료/정리 안정성
+- Scheduler stop timeout returns false
+- Scheduler stop honors cancellation
+- Scheduler survives snapshot handler errors
+
+3. 오버런 정책 이해
+- Scheduler fixed-delay overrun waits after completion
+- Scheduler skip-missed overrun advances schedule
+
+4. 동기화 primitive
+- Semaphore wait/release
+- Semaphore wait observes cancellation
+- MessageQueue preserves FIFO order
+- EventFlags wait-any completes when flag is set
+- EventFlags wait-all waits for all flags
+- Mutex tracks owner and priority inheritance
+
+추천 학습 순서:
+
+1. 테스트 이름을 먼저 읽고 예상 동작을 말로 설명해 본다.
+2. RtosTestRunner에서 해당 테스트 메서드 구현을 읽는다.
+3. 실제 라이브러리 코드로 이동해 같은 흐름을 확인한다.

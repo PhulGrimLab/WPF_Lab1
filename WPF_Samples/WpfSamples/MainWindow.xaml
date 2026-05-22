@@ -233,29 +233,114 @@
                             Padding="12"
                             Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Text="How To Read This Demo"
+                            <TextBlock Text="한눈에 보는 선점 흐름"
                                        FontWeight="SemiBold"
                                        Foreground="#1E3A8A"
                                        Margin="0,0,0,6"/>
+                            <TextBlock Text="{Binding PreemptionFlowHeadline}"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#0F172A"
+                                       Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding PreemptionFlowDetail}"
+                                       Foreground="#1F2937"
+                                       Margin="0,0,0,10"/>
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Background="White"
+                                        BorderBrush="#D7DCE2"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Ellipse Width="18" Height="18" Fill="{Binding PreemptionLowStepBrush}"/>
+                                        <TextBlock Text="1. LOW 작업"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#1F2937"
+                                                   Margin="0,6,0,0"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Grid.Column="1"
+                                           Text="→"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#64748B"
+                                           VerticalAlignment="Center"
+                                           Margin="8,0"/>
+
+                                <Border Grid.Column="2"
+                                        Background="White"
+                                        BorderBrush="#D7DCE2"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Ellipse Width="18" Height="18" Fill="{Binding PreemptionYieldStepBrush}"/>
+                                        <TextBlock Text="2. LOW 양보"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#1F2937"
+                                                   Margin="0,6,0,0"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Grid.Column="3"
+                                           Text="→"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#64748B"
+                                           VerticalAlignment="Center"
+                                           Margin="8,0"/>
+
+                                <Border Grid.Column="4"
+                                        Background="White"
+                                        BorderBrush="#D7DCE2"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Ellipse Width="18" Height="18" Fill="{Binding PreemptionHighStepBrush}"/>
+                                        <TextBlock Text="3. HIGH 선실행"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#1F2937"
+                                                   Margin="0,6,0,0"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <TextBlock Foreground="#1F2937"
+                                       Margin="0,0,0,8"
+                                       TextWrapping="Wrap">
+                                <Run Text="현재 구성: 낮은 우선순위 태스크 "/>
+                                <Run Text="{Binding PreemptionLowTaskCount, Mode=OneWay}" FontWeight="SemiBold"/>
+                                <Run Text="개("/>
+                                <Run Text="{Binding PreemptionLowTaskName, Mode=OneWay}" FontWeight="SemiBold"/>
+                                <Run Text=") / 높은 우선순위 태스크 "/>
+                                <Run Text="{Binding PreemptionHighTaskCount, Mode=OneWay}" FontWeight="SemiBold"/>
+                                <Run Text="개("/>
+                                <Run Text="{Binding PreemptionHighTaskName, Mode=OneWay}" FontWeight="SemiBold"/>
+                                <Run Text=")"/>
+                            </TextBlock>
                             <TextBlock Text="{Binding PreemptionHealthDescription}"
                                        Foreground="#1E3A8A"
                                        FontWeight="SemiBold"
                                        Margin="0,0,0,8"
                                        ToolTip="상태 배지가 왜 이렇게 표시되는지 설명합니다."/>
                             <TextBlock Foreground="#1F2937"
-                                       TextWrapping="Wrap">
-                                <Run Text="1) 데모 시작을 누르면 낮은 우선순위 태스크가 길게 작업하고, 높은 우선순위 태스크가 주기적으로 실행 대기 상태가 됩니다."/>
-                                <LineBreak/>
-                                <Run Text="2) 선점이 잘 동작하면 양보 횟수(Yield Count)가 증가하고, 로그에 'Low task yielded...' 메시지가 반복됩니다."/>
-                                <LineBreak/>
-                                <Run Text="3) 동시에 높은 우선순위 실행 횟수(High Run Count)도 꾸준히 증가해야 합니다(우선 실행 확인)."/>
-                                <LineBreak/>
-                                <Run Text="4) 아래 양보 추이(Yield Trend) 막대가 최근 10초 동안 양보가 얼마나 발생했는지 보여줍니다."/>
-                                <LineBreak/>
-                                <Run Text="정상 패턴: 양보 횟수 ↑ + 높은 우선순위 실행 횟수 ↑ + 로그 연속 발생"/>
-                                <LineBreak/>
-                                <Run Text="점검 필요 패턴: 양보 횟수가 0 근처인데 낮은 우선순위 작업량만 급격히 증가"/>
-                            </TextBlock>
+                                       TextWrapping="Wrap"
+                                       Text="설명문을 길게 읽지 않아도 됩니다. 위 3단계 원형 신호 중 초록색이 현재 진행 단계를 의미합니다."/>
                         </StackPanel>
                     </Border>
 

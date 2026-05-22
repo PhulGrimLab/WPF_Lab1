@@ -1,5 +1,8 @@
 namespace Wpf.Lib.RTOS;
 
+/// <summary>
+/// 태스크 실행 통계를 누적 저장하는 내부 런타임 정보 객체입니다.
+/// </summary>
 internal sealed class TaskRuntimeInfo
 {
     public long RunCount { get; private set; }
@@ -16,6 +19,9 @@ internal sealed class TaskRuntimeInfo
     public Enum_TaskState State { get; private set; } = Enum_TaskState.Ready;
     private long _totalDurationTicks;
 
+    /// <summary>
+    /// 태스크 실행 시작 시점 통계를 기록합니다.
+    /// </summary>
     public void MarkStarted(DateTimeOffset scheduledAt, DateTimeOffset startedAt)
     {
         LastStartedAt = startedAt;
@@ -24,6 +30,9 @@ internal sealed class TaskRuntimeInfo
         State = Enum_TaskState.Running;
     }
 
+    /// <summary>
+    /// 태스크가 정상 완료되었을 때 통계를 갱신합니다.
+    /// </summary>
     public void MarkCompleted(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState)
     {
         if (RunCount < long.MaxValue)
@@ -37,6 +46,9 @@ internal sealed class TaskRuntimeInfo
         State = nextState;
     }
 
+    /// <summary>
+    /// 태스크가 실패했을 때 통계를 갱신합니다.
+    /// </summary>
     public void MarkFailed(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState)
     {
         LastCompletedAt = completedAt;
@@ -45,6 +57,9 @@ internal sealed class TaskRuntimeInfo
         State = nextState;
     }
 
+    /// <summary>
+    /// 외부 전달용 읽기 전용 스냅샷으로 변환합니다.
+    /// </summary>
     public TaskRuntimeSnapshot ToSnapshot()
     {
         return new TaskRuntimeSnapshot(
@@ -88,6 +103,9 @@ internal sealed class TaskRuntimeInfo
     }
 }
 
+/// <summary>
+/// TaskRuntimeInfo의 읽기 전용 전달 모델입니다.
+/// </summary>
 internal sealed record TaskRuntimeSnapshot(
     long RunCount,
     DateTimeOffset? LastStartedAt,

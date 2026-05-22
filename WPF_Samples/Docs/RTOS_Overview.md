@@ -5,8 +5,17 @@
 더 자세한 초보자용 통합 설명서는 다음 문서를 참고하세요.
 
 - Docs/RTOS_Beginner_Complete_Guide.md
+- Docs/RTOS_Beginner_Quick_Start.md
 - Docs/RTOS_Primitives_Deep_Dive.md
 - Docs/RTOS_Simulator_Maturity_Checklist.md
+- Docs/RTOS_Real_vs_Simulator_Gap.md
+
+초보자 추천 순서:
+
+1. Docs/RTOS_Beginner_Quick_Start.md
+2. Docs/RTOS_Beginner_Complete_Guide.md
+3. Docs/RTOS_Primitives_Deep_Dive.md
+4. Docs/RTOS_Test_Guide.md
 
 이 문서는 `Wpf.Lib.RTOS` 라이브러리를 C# 초보자도 이해할 수 있도록 설명하기 위한 문서입니다.
 

@@ -1,5 +1,8 @@
 namespace Wpf.Lib.RTOS;
 
+/// <summary>
+/// 태스크 간 메시지를 주고받기 위한 고정 용량 FIFO 큐입니다.
+/// </summary>
 public sealed class RtosMessageQueue<T> : IDisposable
 {
     private readonly object _syncRoot = new();
@@ -8,6 +11,10 @@ public sealed class RtosMessageQueue<T> : IDisposable
     private readonly SemaphoreSlim _spaces;
     private bool _isDisposed;
 
+    /// <summary>
+    /// 메시지 큐를 생성합니다.
+    /// </summary>
+    /// <param name="capacity">최대 저장 개수입니다.</param>
     public RtosMessageQueue(int capacity)
     {
         if (capacity <= 0)
@@ -20,8 +27,14 @@ public sealed class RtosMessageQueue<T> : IDisposable
         _spaces = new SemaphoreSlim(capacity, capacity);
     }
 
+    /// <summary>
+    /// 큐 최대 용량입니다.
+    /// </summary>
     public int Capacity { get; }
 
+    /// <summary>
+    /// 현재 저장된 메시지 수입니다.
+    /// </summary>
     public int Count
     {
         get
@@ -34,6 +47,13 @@ public sealed class RtosMessageQueue<T> : IDisposable
         }
     }
 
+    /// <summary>
+    /// 메시지를 큐에 넣습니다.
+    /// </summary>
+    /// <param name="message">보낼 메시지입니다.</param>
+    /// <param name="timeout">공간이 생길 때까지 대기할 시간입니다.</param>
+    /// <param name="cancellationToken">취소 토큰입니다.</param>
+    /// <returns>전송 성공 시 true, 타임아웃이면 false입니다.</returns>
     public async Task<bool> SendAsync(T message, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -65,6 +85,12 @@ public sealed class RtosMessageQueue<T> : IDisposable
         }
     }
 
+    /// <summary>
+    /// 메시지를 큐에서 하나 꺼냅니다.
+    /// </summary>
+    /// <param name="timeout">메시지를 기다릴 최대 시간입니다.</param>
+    /// <param name="cancellationToken">취소 토큰입니다.</param>
+    /// <returns>성공 여부와 메시지 값을 튜플로 반환합니다.</returns>
     public async Task<(bool Success, T? Message)> ReceiveAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -89,6 +115,9 @@ public sealed class RtosMessageQueue<T> : IDisposable
         return (true, message);
     }
 
+    /// <summary>
+    /// 큐와 내부 동기화 리소스를 해제합니다.
+    /// </summary>
     public void Dispose()
     {
         lock (_syncRoot)

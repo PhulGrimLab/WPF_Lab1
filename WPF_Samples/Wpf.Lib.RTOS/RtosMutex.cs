@@ -1,5 +1,8 @@
 namespace Wpf.Lib.RTOS;
 
+/// <summary>
+/// 단일 소유자 잠금을 제공하는 mutex 래퍼입니다.
+/// </summary>
 public sealed class RtosMutex : IDisposable
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -10,6 +13,9 @@ public sealed class RtosMutex : IDisposable
     private Enum_TaskPriority _ownerBasePriority;
     private int _isDisposed;
 
+    /// <summary>
+    /// 현재 mutex를 소유한 owner 이름입니다.
+    /// </summary>
     public string? Owner
     {
         get
@@ -23,6 +29,9 @@ public sealed class RtosMutex : IDisposable
         }
     }
 
+    /// <summary>
+    /// 대기 중 태스크 우선순위를 반영한 현재 owner의 유효 우선순위입니다.
+    /// </summary>
     public Enum_TaskPriority? EffectiveOwnerPriority
     {
         get
@@ -43,6 +52,14 @@ public sealed class RtosMutex : IDisposable
         }
     }
 
+    /// <summary>
+    /// owner 이름으로 mutex 획득을 시도합니다.
+    /// </summary>
+    /// <param name="owner">잠금 소유자를 구분하는 문자열입니다.</param>
+    /// <param name="priority">요청 태스크 우선순위입니다.</param>
+    /// <param name="timeout">대기 시간입니다.</param>
+    /// <param name="cancellationToken">취소 토큰입니다.</param>
+    /// <returns>획득 성공 시 true, 타임아웃이면 false입니다.</returns>
     public async Task<bool> WaitAsync(string owner, Enum_TaskPriority priority, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -94,6 +111,10 @@ public sealed class RtosMutex : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// 현재 owner가 mutex를 해제합니다.
+    /// </summary>
+    /// <param name="owner">해제 요청 owner 문자열입니다.</param>
     public void Release(string owner)
     {
         ThrowIfDisposed();
@@ -116,6 +137,9 @@ public sealed class RtosMutex : IDisposable
         _semaphore.Release();
     }
 
+    /// <summary>
+    /// 내부 리소스를 해제합니다.
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0)

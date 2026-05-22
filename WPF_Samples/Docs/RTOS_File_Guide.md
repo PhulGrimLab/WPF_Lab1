@@ -334,6 +334,55 @@ public sealed record ScheduledTaskSnapshot(
 기본 snapshot 간격은 100ms입니다.
 
 즉 태스크 실행 여부는 10ms마다 확인하지만, UI 표시용 상태 이벤트는 100ms마다 발생합니다.
+
+## 2026-05-22 최신 코드 기준 보완 포인트
+
+아래 항목은 초보자가 문서를 읽을 때 헷갈리기 쉬운 부분이라 최신 코드 기준으로 정리한 내용입니다.
+
+### 1) IScheduledTask에는 OverrunPolicy, SetEnabled가 포함됨
+
+최신 `IScheduledTask`는 다음 멤버를 포함합니다.
+
+- `Enum_TaskOverrunPolicy OverrunPolicy`
+- `void SetEnabled(bool isEnabled)`
+
+의미:
+
+- OverrunPolicy: 주기를 넘겨 실행이 늦어진 경우 다음 실행 시각 계산 방식
+- SetEnabled: 태스크 활성/비활성 토글
+
+### 2) SchedulerContext에는 ShouldYield()가 있음
+
+최신 `SchedulerContext`는 `Now`뿐 아니라 `ShouldYield()`를 제공합니다.
+
+의미:
+
+- 협력형 선점 모델에서,
+  현재 태스크가 더 높은 우선순위 runnable 태스크에게 양보해야 하면 true를 반환
+
+### 3) ScheduledTaskSnapshot 필드가 확장됨
+
+현재 snapshot에는 단순 실행횟수 외에도 다음 통계가 포함됩니다.
+
+- `State`
+- `MinDuration`, `MaxDuration`, `AverageDuration`
+- `LastStartDelay`, `MaxStartDelay`
+- `DeadlineMissCount`
+
+즉 화면에서 태스크의 "실행 횟수"뿐 아니라 "실행 품질"도 확인할 수 있습니다.
+
+### 4) SchedulerService는 StopAsync(timeout) 경로를 지원
+
+`StopAsync(TimeSpan timeout)`을 사용하면,
+
+- 제한 시간 안에 종료되면 true
+- 제한 시간을 넘기면 false
+
+를 반환합니다.
+
+초보자 팁:
+
+- 태스크 코드에서 `cancellationToken`을 잘 관찰해야 Stop이 빨리 끝납니다.
 ## 2026-05-22 추가된 RTOS 시뮬레이션 파일
 
 ### RtosEventFlags.cs

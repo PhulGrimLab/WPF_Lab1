@@ -14,6 +14,10 @@
 
 ## 1. 먼저 큰 그림 보기
 
+처음이라면 먼저 아래 빠른 시작을 1회 따라한 뒤 이 문서를 읽는 것을 권장합니다.
+
+- Docs/RTOS_Beginner_Quick_Start.md
+
 전체 구조는 아래처럼 보면 이해가 쉽습니다.
 
 ```text
@@ -439,6 +443,7 @@ stateDiagram-v2
 
 - Docs/RTOS_Primitives_Deep_Dive.md
 - Docs/RTOS_Simulator_Maturity_Checklist.md
+- Docs/RTOS_Real_vs_Simulator_Gap.md
 
 ---
 
@@ -620,3 +625,178 @@ stateDiagram-v2
 
 - Clear()
   - 로그를 모두 비웁니다.
+
+---
+
+## 18. 파일별로 어디부터 읽어야 하는지 (초보자용 코드 지도)
+
+아래 순서대로 파일을 열고, 표시된 함수만 먼저 보면 전체 흐름을 빠르게 잡을 수 있습니다.
+
+### 18-1. Scheduler 코어
+
+1) Wpf.Lib.RTOS/SchedulerService.cs
+- Start()
+- StopAsync(TimeSpan timeout)
+- Register(IScheduledTask task)
+- RunAsync(...)
+- ExecuteTaskAsync(...)
+
+핵심 이해 포인트:
+- "어떤 태스크를 고르는지"는 CopyRunnableTasks
+- "실행 후 다음 시각 계산"은 ScheduleNextRunIfRegistered
+- "UI에 전달할 데이터"는 PublishSnapshot
+
+2) Wpf.Lib.RTOS/IScheduledTask.cs
+- ExecuteAsync(...)
+- SetEnabled(...)
+
+핵심 이해 포인트:
+- 스케줄러가 태스크를 다룰 때 필요한 최소 약속이 무엇인지
+
+3) Wpf.Lib.RTOS/SchedulerTaskBase.cs
+- SetEnabled(...)
+- NextRunAt(get/set)
+- ExecuteAsync(...) (abstract)
+
+핵심 이해 포인트:
+- 스레드 안전한 기본 구현이 어떻게 되어 있는지
+
+4) Wpf.Lib.RTOS/SchedulerContext.cs
+- ShouldYield()
+
+핵심 이해 포인트:
+- 협력형 선점에서 "지금 양보할지"를 태스크가 어떻게 판단하는지
+
+### 18-2. 동기화 primitive
+
+5) Wpf.Lib.RTOS/RtosSemaphore.cs
+- WaitAsync(...)
+- Release()
+
+핵심 이해 포인트:
+- 제한된 자원을 여러 태스크가 나눠 쓰는 기본 패턴
+
+6) Wpf.Lib.RTOS/RtosMutex.cs
+- WaitAsync(...)
+- Release(string owner)
+- EffectiveOwnerPriority
+
+핵심 이해 포인트:
+- owner 검증과 우선순위 상속 모델이 어떻게 흉내 나는지
+
+7) Wpf.Lib.RTOS/RtosEventFlags.cs
+- Set(uint flags)
+- WaitAnyAsync(...)
+- WaitAllAsync(...)
+
+핵심 이해 포인트:
+- 비트마스크 이벤트 동기화와 autoClear 동작
+
+8) Wpf.Lib.RTOS/RtosMessageQueue.cs
+- SendAsync(...)
+- ReceiveAsync(...)
+
+핵심 이해 포인트:
+- 생산자/소비자 형태 메시지 전달 흐름
+
+### 18-3. 시간/로그/상태 스냅샷
+
+9) Wpf.Lib.RTOS/RtosSoftwareTimer.cs
+- Start()
+- StopAsync()
+- TimerError 이벤트
+
+핵심 이해 포인트:
+- periodic vs one-shot, 콜백 예외 처리 정책
+
+10) Wpf.Lib.RTOS/RtosTickCounter.cs
+- AdvanceTo(...)
+- GetTimeForTick(...)
+
+핵심 이해 포인트:
+- tick 기반 시간 모델 계산 방식
+
+11) Wpf.Lib.RTOS/RtosTraceLog.cs
+- Add(...)
+- Snapshot()
+
+핵심 이해 포인트:
+- 고정 길이 로그 버퍼가 왜 필요한지
+
+12) Wpf.Lib.RTOS/SchedulerSnapshot.cs
+13) Wpf.Lib.RTOS/ScheduledTaskSnapshot.cs
+
+핵심 이해 포인트:
+- UI가 내부 mutable 객체 대신 읽기 전용 snapshot을 쓰는 이유
+
+### 18-4. 읽기 팁 (실전)
+
+1) 함수 시그니처 먼저 보기
+- 파라미터와 반환값만 보고 "입력/출력"을 먼저 파악합니다.
+
+2) 예외 조건 먼저 보기
+- throw가 있는 조건을 먼저 읽으면 API 사용 규칙이 빠르게 잡힙니다.
+
+3) 마지막에 lock 범위 보기
+- 동시성 코드에서 lock 범위가 "상태 일관성 경계"입니다.
+
+4) 샘플 앱과 함께 확인
+- WpfSamples/MainWindowViewModel.cs에서 실제 호출 코드를 같이 보면 이해가 2배 빨라집니다.
+
+---
+
+## 19. 초보자가 특히 어려워하는 4개 구간 빠른 해설
+
+### 19-1. SchedulerService.CopyRunnableTasks
+
+헷갈리는 이유:
+- lock, 버퍼 복사, 조건 필터, 정렬이 한 메서드에 같이 있어서 복잡해 보입니다.
+
+핵심만 보면:
+1. lock 안에서 태스크 목록을 복사한다.
+2. lock 밖에서 실행 가능 조건을 검사한다.
+3. 우선순위/시각으로 정렬한다.
+
+왜 이렇게 했는가:
+- 태스크 속성 getter가 느려도 스케줄러 전체 lock을 오래 잡지 않기 위해서입니다.
+
+### 19-2. SchedulerService.ShouldYieldToHigherPriorityTask
+
+헷갈리는 이유:
+- "양보" 조건이 여러 if로 나뉘어 있습니다.
+
+핵심만 보면:
+- "나보다 우선순위 높은 태스크"가 "지금 실행 가능"하면 true
+
+태스크 코드에서 의미:
+- context.ShouldYield()가 true면 현재 작업을 끊고 return해서 CPU를 양보합니다.
+
+### 19-3. RtosEventFlags.WaitAsync + WaitRequest
+
+헷갈리는 이유:
+- timeout, cancellation, dispose를 서로 다르게 처리합니다.
+
+핵심만 보면:
+1. 이미 조건 충족이면 즉시 완료
+2. 아니면 waiter 등록
+3. 이후 완료 원인별로 종료
+
+완료 원인별 결과:
+- 정상 매칭: 결과 비트 반환
+- timeout: TimeoutException
+- cancellation: OperationCanceledException
+- dispose: ObjectDisposedException
+
+### 19-4. SchedulerService.ScheduleNextRunIfRegistered
+
+헷갈리는 이유:
+- OneShot/Periodic 분기와 overrun 정책 계산이 같이 있습니다.
+
+핵심만 보면:
+- OneShot: 1회 실행 후 자동 비활성화
+- Periodic: 정책에 따라 다음 실행 시각 계산
+
+정책 차이 한 줄 요약:
+- FixedRate: 원래 시각 기준
+- FixedDelay: 완료 시각 기준
+- SkipMissedTicks: 놓친 주기 건너뛰기
