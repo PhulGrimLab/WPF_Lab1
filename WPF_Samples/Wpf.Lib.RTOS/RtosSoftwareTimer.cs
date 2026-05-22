@@ -79,7 +79,6 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
             cts = _cts;
             runTask = _runTask;
             _cts = null;
-            _runTask = null;
         }
 
         cts?.Cancel();
@@ -92,6 +91,14 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
             }
             catch (OperationCanceledException)
             {
+            }
+        }
+
+        lock (_syncRoot)
+        {
+            if (ReferenceEquals(_runTask, runTask))
+            {
+                _runTask = null;
             }
         }
 
@@ -111,11 +118,10 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
             cts = _cts;
             runTask = _runTask;
             _cts = null;
-            _runTask = null;
         }
 
         cts?.Cancel();
-        DisposeCancellationSourceWhenStopped(runTask, cts);
+        DisposeCancellationSourceWhenStopped(this, runTask, cts);
     }
 
     /// <summary>
@@ -175,7 +181,7 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         }
     }
 
-    private static void DisposeCancellationSourceWhenStopped(Task? runTask, CancellationTokenSource? cts)
+    private static void DisposeCancellationSourceWhenStopped(RtosSoftwareTimer owner, Task? runTask, CancellationTokenSource? cts)
     {
         if (cts is null)
         {
@@ -184,6 +190,7 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
 
         if (runTask is null || runTask.IsCompleted)
         {
+            owner.ClearRunTaskIfMatches(runTask);
             cts.Dispose();
             ObserveTaskException(runTask);
             return;
@@ -192,12 +199,24 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         _ = runTask.ContinueWith(
             task =>
             {
+                owner.ClearRunTaskIfMatches(task);
                 ObserveTaskException(task);
                 cts.Dispose();
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+    }
+
+    private void ClearRunTaskIfMatches(Task? expected)
+    {
+        lock (_syncRoot)
+        {
+            if (ReferenceEquals(_runTask, expected))
+            {
+                _runTask = null;
+            }
+        }
     }
 
     private static void ObserveTaskException(Task? task)

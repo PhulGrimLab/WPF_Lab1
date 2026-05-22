@@ -22,12 +22,14 @@ internal static class RtosTestRunner
             ("EventFlags wait observes timeout", EventFlagsWaitObservesTimeoutAsync),
             ("EventFlags wait observes cancellation", EventFlagsWaitObservesCancellationAsync),
             ("EventFlags dispose cancels pending wait", EventFlagsDisposeCancelsPendingWaitAsync),
+            ("EventFlags registration failure does not leak waiter", EventFlagsRegistrationFailureDoesNotLeakWaiterAsync),
             ("Mutex tracks owner and priority inheritance", MutexTracksOwnerAndPriorityInheritanceAsync),
             ("Mutex throws after dispose", MutexThrowsAfterDisposeAsync),
             ("SoftwareTimer one-shot fires once", SoftwareTimerOneShotFiresOnceAsync),
             ("SoftwareTimer periodic fires repeatedly", SoftwareTimerPeriodicFiresRepeatedlyAsync),
             ("SoftwareTimer periodic survives callback errors", SoftwareTimerPeriodicSurvivesCallbackErrorsAsync),
             ("SoftwareTimer dispose does not throw while callback runs", SoftwareTimerDisposeDoesNotThrowWhileCallbackRunsAsync),
+            ("SoftwareTimer stop-start race avoids overlapping runs", SoftwareTimerStopStartRaceAvoidsOverlappingRunsAsync),
             ("TickCounter converts time to ticks", TickCounterAsync),
             ("TickCounter rejects overflow tick", TickCounterRejectsOverflowTickAsync),
             ("Scheduler executes periodic task", SchedulerExecutesPeriodicTaskAsync),
@@ -232,6 +234,29 @@ internal static class RtosTestRunner
             "Disposed EventFlags should reject new waits.").ConfigureAwait(false);
     }
 
+    private static async Task EventFlagsRegistrationFailureDoesNotLeakWaiterAsync()
+    {
+        var eventFlags = new RtosEventFlags();
+        using var cts = new CancellationTokenSource();
+        cts.Dispose();
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => eventFlags.WaitAnyAsync(0b0001, autoClear: false, Timeout.InfiniteTimeSpan, cts.Token),
+            "Failed registration should surface the token registration error.").ConfigureAwait(false);
+
+        var waitersField = typeof(RtosEventFlags).GetField("_waiters", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var waiters = (System.Collections.ICollection?)waitersField?.GetValue(eventFlags);
+
+        RtosAssert.True(waiters is not null, "EventFlags internal waiter list should be accessible for leak verification.");
+        RtosAssert.Equal(0, waiters!.Count, "Registration failure should not leave orphaned waiters.");
+
+        var healthyWait = eventFlags.WaitAnyAsync(0b0001, autoClear: true, TimeSpan.FromMilliseconds(200));
+        eventFlags.Set(0b0001);
+        var matched = await healthyWait.ConfigureAwait(false);
+
+        RtosAssert.Equal(0b0001u, matched, "EventFlags should keep working after a failed waiter registration.");
+    }
+
     private static async Task MutexTracksOwnerAndPriorityInheritanceAsync()
     {
         using var mutex = new RtosMutex();
@@ -353,6 +378,48 @@ internal static class RtosTestRunner
         await Task.Delay(120).ConfigureAwait(false);
 
         RtosAssert.True(!timer.IsRunning, "Disposed software timer should no longer report running.");
+    }
+
+    private static async Task SoftwareTimerStopStartRaceAvoidsOverlappingRunsAsync()
+    {
+        var concurrent = 0;
+        var maxConcurrent = 0;
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var timer = new RtosSoftwareTimer(
+            TimeSpan.FromMilliseconds(5),
+            isPeriodic: true,
+            async cancellationToken =>
+            {
+                var current = Interlocked.Increment(ref concurrent);
+                maxConcurrent = Math.Max(maxConcurrent, current);
+                callbackEntered.TrySetResult();
+
+                try
+                {
+                    await releaseCallback.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref concurrent);
+                }
+            });
+
+        timer.Start();
+        var entered = await Task.WhenAny(callbackEntered.Task, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
+        RtosAssert.True(entered == callbackEntered.Task, "Timer callback should start before race test begins.");
+
+        var stopTask = timer.StopAsync();
+        timer.Start();
+
+        await Task.Delay(30).ConfigureAwait(false);
+        releaseCallback.TrySetResult();
+
+        await stopTask.ConfigureAwait(false);
+        await timer.StopAsync().ConfigureAwait(false);
+
+        RtosAssert.Equal(1, maxConcurrent, "Stop-start race should not create overlapping timer runs.");
     }
 
     private static Task TickCounterAsync()

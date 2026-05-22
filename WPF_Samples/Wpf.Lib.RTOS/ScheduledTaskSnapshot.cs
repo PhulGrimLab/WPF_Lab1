@@ -22,4 +22,6 @@ public sealed record ScheduledTaskSnapshot(
     TimeSpan? LastStartDelay,
     TimeSpan? MaxStartDelay,
     long DeadlineMissCount,
-    string? LastError);
+    string? LastError,
+    int? LastStartedThreadId,
+    int? LastCompletedThreadId);

@@ -17,6 +17,8 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
     private string _lastDuration = "-";
     private string _nextRunAt = "-";
     private string _lastError = "-";
+    private string _lastStartedThreadId = "-";
+    private string _lastCompletedThreadId = "-";
 
     public ScheduledTaskStatusViewModel(ScheduledTaskSnapshot snapshot)
     {
@@ -100,6 +102,18 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _lastError, value, nameof(LastError));
     }
 
+    public string LastStartedThreadId
+    {
+        get => _lastStartedThreadId;
+        private set => SetProperty(ref _lastStartedThreadId, value, nameof(LastStartedThreadId));
+    }
+
+    public string LastCompletedThreadId
+    {
+        get => _lastCompletedThreadId;
+        private set => SetProperty(ref _lastCompletedThreadId, value, nameof(LastCompletedThreadId));
+    }
+
     public void Update(ScheduledTaskSnapshot snapshot)
     {
         Priority = snapshot.Priority.ToString();
@@ -118,6 +132,8 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
             ? "-"
             : snapshot.NextRunAt.LocalDateTime.ToString("HH:mm:ss.fff");
         LastError = string.IsNullOrWhiteSpace(snapshot.LastError) ? "-" : snapshot.LastError;
+        LastStartedThreadId = snapshot.LastStartedThreadId?.ToString() ?? "-";
+        LastCompletedThreadId = snapshot.LastCompletedThreadId?.ToString() ?? "-";
     }
 
     private void SetProperty<T>(ref T field, T value, string propertyName)

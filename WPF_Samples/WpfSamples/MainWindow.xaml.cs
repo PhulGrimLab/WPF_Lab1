@@ -12,10 +12,15 @@ namespace WpfSamples
             DataContext = _viewModel;
         }
 
-        protected override void OnClosed(EventArgs e)
+        protected override async void OnClosed(EventArgs e)
         {
-            _viewModel.Dispose();
+            await _viewModel.DisposeAsync();
             base.OnClosed(e);
+
+            if (Application.Current is not null)
+            {
+                Application.Current.Shutdown();
+            }
         }
     }
 }

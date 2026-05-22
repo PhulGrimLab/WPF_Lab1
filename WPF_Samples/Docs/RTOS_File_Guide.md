@@ -408,3 +408,39 @@ one-shot timer와 periodic timer를 지원합니다.
 스케줄러와 태스크 실행 흔적을 보관하는 ring buffer 형태의 trace log입니다.
 
 `SchedulerService.TraceLog`에서 snapshot으로 확인할 수 있습니다.
+
+---
+
+## 2026-05-22 파일 가이드 보강
+
+아래 표는 "초보자가 어디부터 보면 되는지"를 빠르게 결정하기 위한 요약입니다.
+
+| 우선순위 | 파일 | 먼저 볼 함수/멤버 | 왜 먼저 보나 |
+| --- | --- | --- | --- |
+| 1 | `SchedulerService.cs` | `Start`, `RunAsync`, `ExecuteTaskAsync`, `StopAsync` | 전체 실행 흐름의 중심 |
+| 2 | `IScheduledTask.cs` | `ExecuteAsync`, `SetEnabled`, `OverrunPolicy` | 태스크 규약의 기준점 |
+| 3 | `SchedulerTaskBase.cs` | `NextRunAt`, `IsEnabled`, `SetEnabled` | 공통 상태 보호 방식 이해 |
+| 4 | `SchedulerContext.cs` | `Now`, `ShouldYield` | 협력형 선점 핵심 |
+| 5 | `TaskRuntimeInfo.cs` | `MarkStarted`, `MarkCompleted`, `MarkFailed` | 실행 통계 생성 원리 |
+| 6 | `ScheduledTaskSnapshot.cs` | 상태/통계 필드 | UI 표시 모델 이해 |
+| 7 | `RtosEventFlags.cs` | `WaitAnyAsync`, `WaitAllAsync`, `Set`, `Clear` | 신호 동기화 핵심 |
+| 8 | `RtosMessageQueue.cs` | `SendAsync`, `ReceiveAsync` | 데이터 전달 핵심 |
+| 9 | `RtosMutex.cs` | `WaitAsync`, `Release`, `EffectiveOwnerPriority` | 우선순위 역전 학습 포인트 |
+| 10 | `RtosSoftwareTimer.cs` | `Start`, `StopAsync`, `TimerError` | 시간 트리거 동작 |
+
+### 파일 읽을 때 공통 체크 5개
+
+1. timeout과 cancellation이 분리되어 있는가
+2. dispose 후 접근을 막는가
+3. lock 범위가 과도하게 길지 않은가
+4. 실패 경로에서도 상태 복구가 되는가(finally)
+5. UI에 전달되는 데이터가 snapshot 기반인가
+
+### 현재 프로젝트에서 특히 중요한 3개 파일
+
+1. `Wpf.Lib.RTOS/SchedulerService.cs`
+2. `WpfSamples/MainWindowViewModel.cs`
+3. `WpfSamples/MainWindow.xaml`
+
+이 3개를 함께 보면
+"실행 엔진 -> 상태 가공 -> 화면 표시"가 한 번에 연결됩니다.

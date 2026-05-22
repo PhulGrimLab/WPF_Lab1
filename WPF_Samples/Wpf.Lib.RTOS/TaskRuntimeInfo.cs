@@ -16,15 +16,18 @@ internal sealed class TaskRuntimeInfo
     public TimeSpan? MaxStartDelay { get; private set; }
     public long DeadlineMissCount { get; private set; }
     public string? LastError { get; private set; }
+    public int? LastStartedThreadId { get; private set; }
+    public int? LastCompletedThreadId { get; private set; }
     public Enum_TaskState State { get; private set; } = Enum_TaskState.Ready;
     private long _totalDurationTicks;
 
     /// <summary>
     /// 태스크 실행 시작 시점 통계를 기록합니다.
     /// </summary>
-    public void MarkStarted(DateTimeOffset scheduledAt, DateTimeOffset startedAt)
+    public void MarkStarted(DateTimeOffset scheduledAt, DateTimeOffset startedAt, int threadId)
     {
         LastStartedAt = startedAt;
+        LastStartedThreadId = threadId;
         LastStartDelay = startedAt - scheduledAt;
         MaxStartDelay = Max(MaxStartDelay, LastStartDelay.Value);
         State = Enum_TaskState.Running;
@@ -33,7 +36,7 @@ internal sealed class TaskRuntimeInfo
     /// <summary>
     /// 태스크가 정상 완료되었을 때 통계를 갱신합니다.
     /// </summary>
-    public void MarkCompleted(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState)
+    public void MarkCompleted(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState, int threadId)
     {
         if (RunCount < long.MaxValue)
         {
@@ -41,6 +44,7 @@ internal sealed class TaskRuntimeInfo
         }
 
         LastCompletedAt = completedAt;
+        LastCompletedThreadId = threadId;
         SetDuration(duration, period);
         LastError = null;
         State = nextState;
@@ -49,9 +53,10 @@ internal sealed class TaskRuntimeInfo
     /// <summary>
     /// 태스크가 실패했을 때 통계를 갱신합니다.
     /// </summary>
-    public void MarkFailed(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState)
+    public void MarkFailed(DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState, int threadId)
     {
         LastCompletedAt = completedAt;
+        LastCompletedThreadId = threadId;
         SetDuration(duration, period);
         LastError = error;
         State = nextState;
@@ -74,6 +79,8 @@ internal sealed class TaskRuntimeInfo
             MaxStartDelay,
             DeadlineMissCount,
             LastError,
+            LastStartedThreadId,
+            LastCompletedThreadId,
             State);
     }
 
@@ -118,4 +125,6 @@ internal sealed record TaskRuntimeSnapshot(
     TimeSpan? MaxStartDelay,
     long DeadlineMissCount,
     string? LastError,
+    int? LastStartedThreadId,
+    int? LastCompletedThreadId,
     Enum_TaskState State);

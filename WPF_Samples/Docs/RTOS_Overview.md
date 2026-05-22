@@ -136,3 +136,38 @@ MainWindow.xaml
 6. `WpfSamples/MainWindowViewModel.cs`
 
 `IScheduledTask`는 "태스크가 갖춰야 할 약속"이고, `SchedulerService`는 그 약속을 가진 태스크들을 실제로 실행하는 관리자입니다.
+
+---
+
+## 2026-05-22 통합 개선 요약
+
+아래 내용은 최근 코드/문서 개선을 반영한 "현재 기준" 요약입니다.
+
+### A. 선점 모델 해석
+
+1. 현재 프로젝트는 협력형 선점 모델입니다.
+2. 더 높은 우선순위 태스크가 runnable이면 `ShouldYield()`가 true가 될 수 있습니다.
+3. 실행 중 태스크가 이를 확인하고 자발적으로 return할 때 선점 효과가 나타납니다.
+
+즉, 인터럽트 기반 강제 선점이 아니라 "협력형 양보"가 핵심입니다.
+
+### B. UI 스레드와 선점 범위
+
+1. WPF UI 스레드는 화면 갱신 전용 경계입니다.
+2. 선점 판단 대상은 RTOS 태스크(LOW/HIGH 등)입니다.
+3. UI 스레드는 선점 판정 대상에서 제외합니다.
+
+### C. 초보자 문서 읽기 경로
+
+가장 빠른 추천 경로:
+
+1. `Docs/RTOS_Beginner_Quick_Start.md`
+2. `Docs/RTOS_Beginner_Complete_Guide.md`
+3. `Docs/RTOS_Test_Guide.md`
+4. `Docs/RTOS_Primitives_Deep_Dive.md`
+5. `Docs/RTOS_Real_vs_Simulator_Gap.md`
+
+### D. 지금 프로젝트의 한 문장 정의
+
+이 코드는 "실제 RTOS 커널"이 아니라,
+"WPF 환경에서 RTOS 핵심 개념(주기/우선순위/동기화/관측성)을 안전하게 학습하는 시뮬레이터"입니다.

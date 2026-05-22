@@ -1,109 +1,206 @@
-# RTOS 테스트 실행 가이드
+# RTOS 테스트 실행 가이드 (초보자 실습형)
 
-이 문서는 `WpfSamples/Tests` 폴더의 테스트 코드와 WPF UI 테스트 실행 방법을 설명합니다.
+이 문서는 C# 초보자가 "테스트를 실행하고 결과를 해석"하는 데 집중한 실습 가이드입니다.
 
-## 테스트 코드 위치
+이 프로젝트의 테스트는 xUnit/NUnit 기반이 아니라, WPF 앱 안에서 동작하는 자체 러너(`RtosTestRunner`)입니다.
 
-테스트 코드는 아래 폴더에 있습니다.
+---
+
+## 1. 테스트 구조 한눈에 보기
+
+테스트 관련 파일:
 
 ```text
 WpfSamples
  └─ Tests
-    ├─ RtosAssert.cs
-    ├─ RtosTestResult.cs
-    └─ RtosTestRunner.cs
+    ├─ RtosAssert.cs        // 단정 헬퍼
+    ├─ RtosTestResult.cs    // 결과 모델(PASS/FAIL, 시간, 메시지)
+    └─ RtosTestRunner.cs    // 테스트 목록/실행 엔진
 ```
 
-별도의 xUnit, NUnit 같은 외부 테스트 프레임워크를 사용하지 않았습니다.
+핵심 개념:
 
-WPF 샘플 프로그램 안에서 바로 실행할 수 있도록 간단한 테스트 러너를 직접 만들었습니다.
+1. `RunAllAsync()`가 테스트 목록을 순서대로 실행
+2. 예외가 없으면 PASS
+3. 예외가 발생하면 FAIL + 예외 메시지 기록
 
-## 테스트 실행 방법
+---
 
-1. `WpfSamples` 프로그램을 실행합니다.
-2. 상단 탭에서 `RTOS Tests`를 선택합니다.
-3. `Run Tests` 버튼을 누릅니다.
-4. 아래 DataGrid에서 테스트 결과를 확인합니다.
+## 2. 테스트 실행 방법 (UI)
 
-결과는 다음 컬럼으로 표시됩니다.
+1. `WpfSamples` 실행
+2. 상단 탭에서 `RTOS Tests` 선택
+3. `Run Tests` 버튼 클릭
+4. DataGrid 결과 확인
 
-| 컬럼 | 설명 |
+결과 컬럼 의미:
+
+| 컬럼 | 의미 |
 | --- | --- |
 | `Test` | 테스트 이름 |
-| `Result` | PASS 또는 FAIL |
-| `Duration` | 테스트 실행 시간 |
-| `Message` | 성공 메시지 또는 실패 이유 |
+| `Result` | PASS / FAIL |
+| `Duration` | 실행 시간 |
+| `Message` | 성공 메시지(OK) 또는 실패 원인 |
 
-## 현재 포함된 테스트
+초보자 팁:
 
-### Semaphore wait/release
+1. FAIL이 나오면 `Message`를 먼저 읽고
+2. 해당 테스트 이름을 `RtosTestRunner.cs`에서 검색해 구현을 확인하세요.
 
-`RtosSemaphore`가 정상적으로 자원을 획득하고 반환하는지 확인합니다.
+---
 
-검증 내용:
+## 3. 현재 테스트 목록 요약 (실제 코드 기준)
 
-```text
-초기 count가 1이면 첫 WaitAsync는 성공해야 한다.
-count가 0이면 다음 WaitAsync는 timeout되어야 한다.
-Release 후에는 다시 WaitAsync가 성공해야 한다.
-```
+아래 그룹은 `RtosTestRunner.RunAllAsync()` 기준으로 정리했습니다.
 
-### MessageQueue send/receive
+### 3-1. Semaphore
 
-`RtosMessageQueue<T>`가 메시지를 넣고 꺼낼 수 있는지 확인합니다.
+1. Semaphore wait/release
+2. Semaphore rejects over-release
+3. Semaphore wait observes cancellation
+4. Semaphore throws after dispose
 
-검증 내용:
+무엇을 보장하나:
 
-```text
-빈 큐에 SendAsync는 성공해야 한다.
-가득 찬 큐에 SendAsync는 timeout되어야 한다.
-ReceiveAsync로 송신한 값을 다시 받을 수 있어야 한다.
-```
+1. 기본 획득/반환
+2. 과도한 Release 방지
+3. cancellation 관찰
+4. dispose 후 접근 차단
 
-### TickCounter converts time to ticks
+### 3-2. MessageQueue
 
-`RtosTickCounter`가 시간 차이를 tick 값으로 바르게 변환하는지 확인합니다.
+1. MessageQueue send/receive
+2. MessageQueue preserves FIFO order
+3. MessageQueue receive timeout
+4. MessageQueue throws after dispose
 
-검증 내용:
+무엇을 보장하나:
 
-```text
-tick interval이 10ms일 때 35ms는 3 tick이어야 한다.
-3 tick의 시간은 시작 시각 + 30ms이어야 한다.
-```
+1. 송수신 기본 동작
+2. FIFO 순서
+3. 빈 큐 timeout
+4. dispose 안정성
 
-### Scheduler executes periodic task
+### 3-3. EventFlags
 
-`SchedulerService`가 등록된 주기 태스크를 실제로 반복 실행하는지 확인합니다.
+1. EventFlags wait-any completes when flag is set
+2. EventFlags wait-all waits for all flags
+3. EventFlags wait observes timeout
+4. EventFlags wait observes cancellation
+5. EventFlags dispose cancels pending wait
 
-검증 내용:
+무엇을 보장하나:
 
-```text
-10ms 주기 태스크를 등록한다.
-스케줄러를 약 60ms 실행한다.
-태스크가 2회 이상 실행되었는지 확인한다.
-```
+1. WaitAny/WaitAll 의미 분리
+2. timeout/cancel/dispose 시나리오 분리
 
-### Scheduler snapshot contains task state
+### 3-4. Mutex
 
-스케줄러 snapshot에 태스크 상태가 들어오는지 확인합니다.
+1. Mutex tracks owner and priority inheritance
+2. Mutex throws after dispose
 
-검증 내용:
+무엇을 보장하나:
 
-```text
-태스크를 등록하고 스케줄러를 실행한다.
-SnapshotChanged 이벤트를 통해 snapshot을 받는다.
-snapshot 안에 등록한 태스크가 있는지 확인한다.
-태스크 상태가 Ready 또는 Blocked인지 확인한다.
-```
+1. owner 추적
+2. 대기 우선순위 기반 effective priority 반영
+3. dispose 안정성
 
-## 새 테스트 추가 방법
+### 3-5. SoftwareTimer
 
-새 테스트는 `RtosTestRunner.cs`에 추가합니다.
+1. SoftwareTimer one-shot fires once
+2. SoftwareTimer periodic fires repeatedly
+3. SoftwareTimer periodic survives callback errors
+4. SoftwareTimer dispose does not throw while callback runs
 
-1. 테스트 메서드를 만든다.
-2. `RunAllAsync`의 tests 배열에 추가한다.
+무엇을 보장하나:
 
-예시:
+1. one-shot/periodic 동작
+2. periodic 콜백 오류 복원력
+3. dispose 시 예외 안전성
+
+### 3-6. TickCounter
+
+1. TickCounter converts time to ticks
+2. TickCounter rejects overflow tick
+
+무엇을 보장하나:
+
+1. 시간 -> tick 변환 정확성
+2. overflow 방어
+
+### 3-7. Scheduler 핵심
+
+1. Scheduler executes periodic task
+2. Scheduler runs higher priority task first
+3. Scheduler cooperative preemption yields to higher priority
+4. Scheduler executes one-shot task once
+5. Scheduler stop timeout returns false
+6. Scheduler self stop with infinite timeout returns false
+7. Scheduler stop honors cancellation
+8. Scheduler unregister prevents future execution
+9. Scheduler clear removes all tasks
+10. Scheduler reports task errors
+11. Scheduler survives snapshot handler errors
+12. Scheduler records trace entries
+13. Scheduler snapshot contains runtime statistics
+14. Scheduler overrun task does not overlap
+15. Scheduler fixed-delay overrun waits after completion
+16. Scheduler skip-missed overrun advances schedule
+17. Scheduler snapshot contains task state
+18. Scheduler snapshot survives faulty task properties
+
+무엇을 보장하나:
+
+1. 기본 실행/우선순위/OneShot
+2. 협력형 선점(ShouldYield)
+3. 정지/정리/오류 내성
+4. 오버런 정책
+5. 스냅샷/트레이스 안정성
+
+---
+
+## 4. 초보자 추천 학습 순서 (테스트 중심)
+
+아래 순서대로 보면 이해가 빠릅니다.
+
+1. Scheduler executes periodic task
+2. Scheduler runs higher priority task first
+3. Scheduler cooperative preemption yields to higher priority
+4. Scheduler executes one-shot task once
+5. Scheduler fixed-delay overrun waits after completion
+6. Scheduler skip-missed overrun advances schedule
+7. EventFlags wait-all waits for all flags
+8. MessageQueue preserves FIFO order
+9. Mutex tracks owner and priority inheritance
+
+읽는 방법:
+
+1. 테스트 이름으로 의도를 먼저 말로 설명
+2. Arrange/Act/Assert 흐름으로 코드 확인
+3. 라이브러리 코드(`Wpf.Lib.RTOS`)로 이동해 같은 흐름 추적
+
+---
+
+## 5. FAIL이 났을 때 빠른 디버깅 순서
+
+1. UI `Message` 컬럼의 예외 메시지 확인
+2. 테스트 이름으로 `RtosTestRunner.cs` 검색
+3. 해당 테스트가 어떤 클래스를 사용하는지 확인
+4. 클래스의 dispose/timeout/cancellation 처리부터 점검
+5. 마지막으로 SchedulerSnapshot/TraceLog를 확인
+
+초보자 체크리스트:
+
+1. timeout과 cancellation을 같은 것으로 처리하지 않았는가?
+2. dispose 후 접근이 허용되고 있지 않은가?
+3. Periodic/OneShot 분기가 뒤집히지 않았는가?
+4. lock 범위를 너무 길게 잡아 교착 가능성이 생기지 않았는가?
+
+---
+
+## 6. 새 테스트 추가 방법 (안전한 패턴)
+
+### 6-1. 테스트 메서드 작성
 
 ```csharp
 private static Task MyNewTestAsync()
@@ -113,7 +210,7 @@ private static Task MyNewTestAsync()
 }
 ```
 
-등록:
+### 6-2. RunAllAsync 배열에 등록
 
 ```csharp
 var tests = new (string Name, Func<Task> Execute)[]
@@ -122,84 +219,35 @@ var tests = new (string Name, Func<Task> Execute)[]
 };
 ```
 
-테스트가 예외 없이 끝나면 PASS입니다.
+네이밍 팁:
 
-테스트 중 예외가 발생하면 FAIL로 표시되고, 예외 메시지가 UI에 표시됩니다.
-## 2026-05-22 추가 테스트
-
-RTOS 동작 검증을 위해 다음 테스트가 추가되었습니다.
-
-```text
-Semaphore wait observes cancellation
-MessageQueue preserves FIFO order
-Scheduler stop honors cancellation
-Scheduler unregister prevents future execution
-Scheduler clear removes all tasks
-Scheduler reports task errors
-Scheduler survives snapshot handler errors
-Scheduler fixed-delay overrun waits after completion
-Scheduler skip-missed overrun advances schedule
-```
-
-특히 overrun 테스트는 태스크 실행 시간이 주기보다 길어졌을 때 다음 실행 시각을 어떻게 계산할지 확인합니다.
-
-`FixedDelay`는 태스크 완료 시각 뒤에 period를 더합니다.
-
-`SkipMissedTicks`는 놓친 주기를 건너뛰고 완료 시각 이후의 다음 주기로 이동합니다.
-## 2026-05-22 RTOS primitive 추가 테스트
-
-다음 RTOS 시뮬레이션 기능과 테스트가 추가되었습니다.
-
-```text
-EventFlags wait-any completes when flag is set
-EventFlags wait-all waits for all flags
-Mutex tracks owner and priority inheritance
-SoftwareTimer one-shot fires once
-SoftwareTimer periodic fires repeatedly
-Scheduler records trace entries
-Scheduler snapshot contains runtime statistics
-```
-
-`RtosEventFlags`는 여러 bit 이벤트를 기다리는 기능입니다.
-
-`RtosMutex`는 owner 추적과 priority inheritance 개념을 흉내냅니다. 실제 Windows 스케줄러의 우선순위를 바꾸는 것은 아니고, RTOS에서 발생하는 priority inversion 상황을 학습하기 위한 상태 모델입니다.
-
-`RtosSoftwareTimer`는 `Task.Delay` 기반 one-shot/periodic timer입니다. 실제 RTOS timer interrupt처럼 정확한 실시간 보장은 하지 않습니다.
-
-`SchedulerService.TraceLog`는 태스크 등록, 시작, 완료, 실패 같은 실행 흔적을 보관합니다.
-
-`ScheduledTaskSnapshot`에는 실행시간 통계와 deadline miss count가 추가되었습니다.
+1. "대상 + 기대 결과" 형태로 이름 작성
+2. 예: `Scheduler stop timeout returns false`
 
 ---
 
-## 기능별로 어떤 테스트를 먼저 보면 좋은가
+## 7. 선점 테스트 읽을 때 주의할 점
 
-초보자에게는 "기능 -> 테스트" 매핑으로 보는 것이 가장 이해가 빠릅니다.
+현재 프로젝트의 선점 모델은 협력형 선점입니다.
 
-1. 스케줄러 기본 동작
-- Scheduler executes periodic task
-- Scheduler runs higher priority task first
-- Scheduler executes one-shot task once
+1. 스케줄러가 더 높은 우선순위 runnable 상태를 감지
+2. 실행 중 태스크가 `context.ShouldYield()`를 보고 자발적으로 양보
 
-2. 종료/정리 안정성
-- Scheduler stop timeout returns false
-- Scheduler stop honors cancellation
-- Scheduler survives snapshot handler errors
+중요:
 
-3. 오버런 정책 이해
-- Scheduler fixed-delay overrun waits after completion
-- Scheduler skip-missed overrun advances schedule
+1. 이는 인터럽트 기반 강제 선점이 아님
+2. UI 스레드는 선점 판정 대상이 아님
+3. 선점 판정은 RTOS 태스크 간 우선순위 모델 검증 목적
 
-4. 동기화 primitive
-- Semaphore wait/release
-- Semaphore wait observes cancellation
-- MessageQueue preserves FIFO order
-- EventFlags wait-any completes when flag is set
-- EventFlags wait-all waits for all flags
-- Mutex tracks owner and priority inheritance
+---
 
-추천 학습 순서:
+## 8. 마무리 요약
 
-1. 테스트 이름을 먼저 읽고 예상 동작을 말로 설명해 본다.
-2. RtosTestRunner에서 해당 테스트 메서드 구현을 읽는다.
-3. 실제 라이브러리 코드로 이동해 같은 흐름을 확인한다.
+한 문장으로 정리하면:
+
+- 이 테스트 세트는 "기능 동작 여부"만이 아니라, timeout/cancellation/dispose/overrun/오류 복원력까지 함께 검증하는 안정성 테스트 묶음입니다.
+
+다음 문서:
+
+1. Docs/RTOS_Beginner_Complete_Guide.md
+2. Docs/RTOS_Real_vs_Simulator_Gap.md

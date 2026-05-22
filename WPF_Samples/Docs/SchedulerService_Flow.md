@@ -282,3 +282,59 @@ public void Dispose()
 실행할 태스크를 실행한다.
 상태를 Snapshot으로 알려준다.
 ```
+
+---
+
+## 2026-05-22 최신 동작 보강
+
+### 1) StopAsync(TimeSpan timeout) 해석
+
+현재 구현은 "종료 요청"과 "종료 대기"를 분리해 다룹니다.
+
+1. Stop 요청: 내부 token cancel
+2. 대기: timeout 안에 루프 종료를 기다림
+3. timeout 초과 시: false 반환 가능
+
+초보자 포인트:
+
+- false는 "중지 요청 실패"가 아니라 "지정 시간 안에 완료 확인을 못함"에 가깝습니다.
+
+### 2) 스케줄러 내부 자기중지 보호
+
+스케줄러 실행 컨텍스트에서
+무한 대기 StopAsync를 직접 호출하면 교착 위험이 있습니다.
+
+현재 구현은 이 케이스를 보호하도록 되어 있습니다.
+
+### 3) 협력형 선점 판단 위치
+
+선점 판단은 두 단계로 이루어집니다.
+
+1. `ShouldYieldToHigherPriorityTask`가 "더 높은 우선순위 + runnable"을 판단
+2. 태스크 본문이 `context.ShouldYield()`를 호출해 실제 양보 여부를 결정
+
+즉 스케줄러가 강제로 중단시키는 구조가 아니라,
+태스크가 안전한 지점에서 스스로 양보하는 구조입니다.
+
+### 4) 문서 읽기 보조 다이어그램
+
+```text
+Start()
+    -> RunAsync loop
+         -> CopyRunnableTasks
+         -> ExecuteTaskAsync
+                -> MarkStarted
+                -> task.ExecuteAsync
+                -> MarkCompleted or MarkFailed
+                -> ScheduleNextRunIfRegistered
+         -> PublishSnapshotIfDue
+StopAsync(timeout)
+    -> Cancel token
+    -> Wait for loop termination (until timeout)
+```
+
+### 5) 초보자 디버깅 체크
+
+1. Stop이 느리면: 태스크 내부 cancellationToken 확인 지점 점검
+2. 실행 순서가 이상하면: Priority와 NextRunAt 값 점검
+3. 선점이 약하면: LOW 태스크에서 `ShouldYield()` 호출 주기 점검

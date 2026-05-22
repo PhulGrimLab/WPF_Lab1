@@ -412,7 +412,7 @@ namespace Wpf.Lib.RTOS
             var completedAt = now;
             var executionContext = new SchedulerContext(now, () => ShouldYieldToHigherPriorityTask(task));
 
-            MarkTaskStarted(task, now, DateTimeOffset.Now);
+            MarkTaskStarted(task, now, DateTimeOffset.Now, Environment.CurrentManagedThreadId);
             TraceLog.Add("Task", "Task execution started.", GetTaskName(task));
 
             try
@@ -424,7 +424,7 @@ namespace Wpf.Lib.RTOS
                 
                 // Periodic 태스크는 Ready 상태로, OneShot 태스크는 Suspended 상태로 전환
                 var nextState = CalculateNextTaskState(task, completedAt);
-                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState);
+                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState, Environment.CurrentManagedThreadId);
                 TraceLog.Add("Task", $"Task execution completed in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -436,7 +436,7 @@ namespace Wpf.Lib.RTOS
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
                 var nextState = CalculateNextTaskState(task, completedAt);
-                MarkTaskFailed(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), ex.Message, nextState);
+                MarkTaskFailed(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), ex.Message, nextState, Environment.CurrentManagedThreadId);
                 TraceLog.Add("Task", $"Task execution failed: {ex.Message}", GetTaskName(task));
                 RaiseSchedulerError(ex);
             }
@@ -494,35 +494,35 @@ namespace Wpf.Lib.RTOS
             }
         }
 
-        private void MarkTaskStarted(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset startedAt)
+        private void MarkTaskStarted(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset startedAt, int threadId)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkStarted(scheduledAt, startedAt);
+                    runtimeInfo.MarkStarted(scheduledAt, startedAt, threadId);
                 }
             }
         }
 
-        private void MarkTaskCompleted(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState)
+        private void MarkTaskCompleted(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState, int threadId)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkCompleted(completedAt, duration, period, nextState);
+                    runtimeInfo.MarkCompleted(completedAt, duration, period, nextState, threadId);
                 }
             }
         }
 
-        private void MarkTaskFailed(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState)
+        private void MarkTaskFailed(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState, int threadId)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkFailed(completedAt, duration, period, error, nextState);
+                    runtimeInfo.MarkFailed(completedAt, duration, period, error, nextState, threadId);
                 }
             }
         }
@@ -634,7 +634,9 @@ namespace Wpf.Lib.RTOS
                 runtimeInfo.LastStartDelay,
                 runtimeInfo.MaxStartDelay,
                 runtimeInfo.DeadlineMissCount,
-                runtimeInfo.LastError);
+                runtimeInfo.LastError,
+                runtimeInfo.LastStartedThreadId,
+                runtimeInfo.LastCompletedThreadId);
         }
 
         /// <summary>

@@ -11,7 +11,7 @@ using WpfSamples.Samples_RTOS;
 
 namespace WpfSamples;
 
-internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
+internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable, IAsyncDisposable
 {
     private static readonly Brush HealthStoppedBackground = new SolidColorBrush(Color.FromRgb(229, 231, 235));
     private static readonly Brush HealthStoppedForeground = new SolidColorBrush(Color.FromRgb(55, 65, 81));
@@ -23,6 +23,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private static readonly Brush HealthMonitoringForeground = new SolidColorBrush(Color.FromRgb(30, 64, 175));
     private static readonly Brush FlowActiveBrush = new SolidColorBrush(Color.FromRgb(22, 163, 74));
     private static readonly Brush FlowIdleBrush = new SolidColorBrush(Color.FromRgb(209, 213, 219));
+    private static readonly Brush InspectorIdleBackground = new SolidColorBrush(Color.FromRgb(248, 250, 252));
+    private static readonly Brush InspectorIdleBorder = new SolidColorBrush(Color.FromRgb(226, 232, 240));
+    private static readonly Brush InspectorLowActiveBackground = new SolidColorBrush(Color.FromRgb(220, 252, 231));
+    private static readonly Brush InspectorLowActiveBorder = new SolidColorBrush(Color.FromRgb(134, 239, 172));
+    private static readonly Brush InspectorHighActiveBackground = new SolidColorBrush(Color.FromRgb(254, 226, 226));
+    private static readonly Brush InspectorHighActiveBorder = new SolidColorBrush(Color.FromRgb(252, 165, 165));
+    private static readonly Brush InspectorCurrentActiveBackground = new SolidColorBrush(Color.FromRgb(219, 234, 254));
+    private static readonly Brush InspectorCurrentActiveBorder = new SolidColorBrush(Color.FromRgb(147, 197, 253));
 
     private readonly SchedulerService _scheduler = new();
     private SchedulerService? _preemptionTestScheduler;
@@ -42,9 +50,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private int _preemptionLowWorkUnits;
     private int _preemptionHighRunCount;
     private int _preemptionYieldCount;
+    private int _preemptionLowLastThreadId;
+    private int _preemptionHighLastThreadId;
+    private int _preemptionCurrentExecutionThreadId;
     private int _preemptionLowWorkUnitsCounter;
     private int _preemptionHighRunCountCounter;
     private int _preemptionYieldCountCounter;
+    private int _preemptionLowLastThreadIdCounter;
+    private int _preemptionHighLastThreadIdCounter;
     private DateTime _lastTrendSecond = DateTime.MinValue;
     private int _lastYieldTotalForTrend;
     private int _preemptionTrendMaxYield = 1;
@@ -60,6 +73,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private long _lastLowWorkTick;
     private long _lastYieldTick;
     private long _lastHighRunTick;
+    private string _preemptionActiveTask = "대기 중";
+    private Brush _preemptionLowInspectorBackground = InspectorIdleBackground;
+    private Brush _preemptionLowInspectorBorder = InspectorIdleBorder;
+    private Brush _preemptionHighInspectorBackground = InspectorIdleBackground;
+    private Brush _preemptionHighInspectorBorder = InspectorIdleBorder;
+    private Brush _preemptionCurrentInspectorBackground = InspectorIdleBackground;
+    private Brush _preemptionCurrentInspectorBorder = InspectorIdleBorder;
 
     public MainWindowViewModel()
     {
@@ -221,6 +241,164 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public int PreemptionLowLastThreadId
+    {
+        get => _preemptionLowLastThreadId;
+        private set
+        {
+            if (_preemptionLowLastThreadId == value)
+            {
+                return;
+            }
+
+            _preemptionLowLastThreadId = value;
+            OnPropertyChanged(nameof(PreemptionLowLastThreadId));
+        }
+    }
+
+    public int PreemptionHighLastThreadId
+    {
+        get => _preemptionHighLastThreadId;
+        private set
+        {
+            if (_preemptionHighLastThreadId == value)
+            {
+                return;
+            }
+
+            _preemptionHighLastThreadId = value;
+            OnPropertyChanged(nameof(PreemptionHighLastThreadId));
+        }
+    }
+
+    public int PreemptionUiThreadId => _dispatcher.Thread.ManagedThreadId;
+
+    public int PreemptionCurrentExecutionThreadId
+    {
+        get => _preemptionCurrentExecutionThreadId;
+        private set
+        {
+            if (_preemptionCurrentExecutionThreadId == value)
+            {
+                return;
+            }
+
+            _preemptionCurrentExecutionThreadId = value;
+            OnPropertyChanged(nameof(PreemptionCurrentExecutionThreadId));
+            OnPropertyChanged(nameof(PreemptionCurrentExecutionThreadLabel));
+        }
+    }
+
+    public string PreemptionCurrentExecutionThreadLabel =>
+        PreemptionCurrentExecutionThreadId > 0
+            ? PreemptionCurrentExecutionThreadId.ToString(CultureInfo.InvariantCulture)
+            : "없음";
+
+    public string PreemptionActiveTask
+    {
+        get => _preemptionActiveTask;
+        private set
+        {
+            if (_preemptionActiveTask == value)
+            {
+                return;
+            }
+
+            _preemptionActiveTask = value;
+            OnPropertyChanged(nameof(PreemptionActiveTask));
+        }
+    }
+
+    public Brush PreemptionLowInspectorBackground
+    {
+        get => _preemptionLowInspectorBackground;
+        private set
+        {
+            if (ReferenceEquals(_preemptionLowInspectorBackground, value))
+            {
+                return;
+            }
+
+            _preemptionLowInspectorBackground = value;
+            OnPropertyChanged(nameof(PreemptionLowInspectorBackground));
+        }
+    }
+
+    public Brush PreemptionLowInspectorBorder
+    {
+        get => _preemptionLowInspectorBorder;
+        private set
+        {
+            if (ReferenceEquals(_preemptionLowInspectorBorder, value))
+            {
+                return;
+            }
+
+            _preemptionLowInspectorBorder = value;
+            OnPropertyChanged(nameof(PreemptionLowInspectorBorder));
+        }
+    }
+
+    public Brush PreemptionHighInspectorBackground
+    {
+        get => _preemptionHighInspectorBackground;
+        private set
+        {
+            if (ReferenceEquals(_preemptionHighInspectorBackground, value))
+            {
+                return;
+            }
+
+            _preemptionHighInspectorBackground = value;
+            OnPropertyChanged(nameof(PreemptionHighInspectorBackground));
+        }
+    }
+
+    public Brush PreemptionHighInspectorBorder
+    {
+        get => _preemptionHighInspectorBorder;
+        private set
+        {
+            if (ReferenceEquals(_preemptionHighInspectorBorder, value))
+            {
+                return;
+            }
+
+            _preemptionHighInspectorBorder = value;
+            OnPropertyChanged(nameof(PreemptionHighInspectorBorder));
+        }
+    }
+
+    public Brush PreemptionCurrentInspectorBackground
+    {
+        get => _preemptionCurrentInspectorBackground;
+        private set
+        {
+            if (ReferenceEquals(_preemptionCurrentInspectorBackground, value))
+            {
+                return;
+            }
+
+            _preemptionCurrentInspectorBackground = value;
+            OnPropertyChanged(nameof(PreemptionCurrentInspectorBackground));
+        }
+    }
+
+    public Brush PreemptionCurrentInspectorBorder
+    {
+        get => _preemptionCurrentInspectorBorder;
+        private set
+        {
+            if (ReferenceEquals(_preemptionCurrentInspectorBorder, value))
+            {
+                return;
+            }
+
+            _preemptionCurrentInspectorBorder = value;
+            OnPropertyChanged(nameof(PreemptionCurrentInspectorBorder));
+        }
+    }
+
     public int PreemptionTrendMaxYield
     {
         get => _preemptionTrendMaxYield;
@@ -379,10 +557,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
+        if (_dispatcher.CheckAccess())
+        {
+            _ = DisposeAsync();
+            return;
+        }
+
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
         _scheduler.SnapshotChanged -= OnSchedulerSnapshotChanged;
         _preemptionUiTimer.Stop();
         _preemptionUiTimer.Tick -= OnPreemptionUiTimerTick;
-        StopPreemptionTestAsync().GetAwaiter().GetResult();
+        await StopPreemptionTestAsync().ConfigureAwait(false);
         _scheduler.Dispose();
     }
 
@@ -445,6 +634,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         Interlocked.Exchange(ref _preemptionLowWorkUnitsCounter, 0);
         Interlocked.Exchange(ref _preemptionHighRunCountCounter, 0);
         Interlocked.Exchange(ref _preemptionYieldCountCounter, 0);
+        Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, 0);
+        Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, 0);
         Interlocked.Exchange(ref _lastLowWorkTick, 0);
         Interlocked.Exchange(ref _lastYieldTick, 0);
         Interlocked.Exchange(ref _lastHighRunTick, 0);
@@ -460,6 +651,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             PreemptionLowWorkUnits = 0;
             PreemptionHighRunCount = 0;
             PreemptionYieldCount = 0;
+            PreemptionLowLastThreadId = 0;
+            PreemptionHighLastThreadId = 0;
+            PreemptionCurrentExecutionThreadId = 0;
+            PreemptionActiveTask = "대기 중";
+            UpdatePreemptionInspectorHighlight();
             PreemptionTrendMaxYield = 1;
             SetPreemptionHealth(
                 label: "초기화",
@@ -492,6 +688,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             Enum_TaskExecutionMode.Periodic,
             async (context, cancellationToken) =>
             {
+                Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 Interlocked.Exchange(ref _lastLowWorkTick, DateTime.UtcNow.Ticks);
 
                 for (var i = 0; i < 120; i++)
@@ -501,7 +698,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                         Interlocked.Increment(ref _preemptionYieldCountCounter);
                         Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
                         await _dispatcher.InvokeAsync(() =>
-                            AppendPreemptionLog("Low Priority Worker가 ShouldYield()=true를 감지해 양보했습니다. 다음 tick에서 High Priority Urgent가 먼저 실행됩니다.")).Task.ConfigureAwait(false);
+                            AppendPreemptionLog($"Low Priority Worker(TID={Environment.CurrentManagedThreadId})가 ShouldYield()=true를 감지해 양보했습니다. 다음 tick에서 High Priority Urgent가 먼저 실행됩니다.")).Task.ConfigureAwait(false);
                         return;
                     }
 
@@ -522,10 +719,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             Enum_TaskExecutionMode.Periodic,
             (_, _) =>
             {
+                Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 var count = Interlocked.Increment(ref _preemptionHighRunCountCounter);
                 Interlocked.Exchange(ref _lastHighRunTick, DateTime.UtcNow.Ticks);
                 _ = _dispatcher.BeginInvoke(() =>
-                    AppendPreemptionLog($"High Priority Urgent 실행 완료. 누적 실행 횟수={count}"));
+                    AppendPreemptionLog($"High Priority Urgent(TID={Environment.CurrentManagedThreadId}) 실행 완료. 누적 실행 횟수={count}"));
                 return Task.CompletedTask;
             },
             statusProvider: () => "Urgent high-priority work"));
@@ -560,6 +758,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 _preemptionUiTimer.Stop();
                 PreemptionTestState = "Stopped";
                 LastPreemptionEvent = "Preemption demo stopped.";
+                PreemptionCurrentExecutionThreadId = 0;
+                PreemptionActiveTask = "중지";
+                UpdatePreemptionInspectorHighlight();
                 SetPreemptionHealth(
                     label: "중지",
                     description: "데모가 중지되어 상태 분석을 멈췄습니다.",
@@ -580,6 +781,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                     _preemptionUiTimer.Stop();
                     PreemptionTestState = "Stopped";
                     LastPreemptionEvent = "Preemption demo stopped.";
+                    PreemptionCurrentExecutionThreadId = 0;
+                    PreemptionActiveTask = "중지";
+                    UpdatePreemptionInspectorHighlight();
                     SetPreemptionHealth(
                         label: "중지",
                         description: "데모가 중지되어 상태 분석을 멈췄습니다.",
@@ -602,6 +806,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         PreemptionLowWorkUnits = Volatile.Read(ref _preemptionLowWorkUnitsCounter);
         PreemptionHighRunCount = Volatile.Read(ref _preemptionHighRunCountCounter);
         PreemptionYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
+        PreemptionLowLastThreadId = Volatile.Read(ref _preemptionLowLastThreadIdCounter);
+        PreemptionHighLastThreadId = Volatile.Read(ref _preemptionHighLastThreadIdCounter);
         UpdatePreemptionHealthStatus();
         UpdatePreemptionFlowStatus();
 
@@ -712,6 +918,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     {
         if (!_isPreemptionTestRunning)
         {
+            PreemptionCurrentExecutionThreadId = 0;
+            PreemptionActiveTask = "중지";
+            UpdatePreemptionInspectorHighlight();
             SetPreemptionFlow(
                 headline: "중지",
                 detail: "데모 시작 후 단계 신호가 켜집니다.",
@@ -728,6 +937,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         if (yieldRecent && highRecent)
         {
+            PreemptionCurrentExecutionThreadId = PreemptionHighLastThreadId;
+            PreemptionActiveTask = "HIGH Priority Urgent (선점 직후)";
+            UpdatePreemptionInspectorHighlight();
             SetPreemptionFlow(
                 headline: "선점 성립",
                 detail: "LOW가 양보했고 HIGH가 즉시 선실행되었습니다.",
@@ -739,6 +951,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         if (highRecent)
         {
+            PreemptionCurrentExecutionThreadId = PreemptionHighLastThreadId;
+            PreemptionActiveTask = "HIGH Priority Urgent";
+            UpdatePreemptionInspectorHighlight();
             SetPreemptionFlow(
                 headline: "HIGH 우선 실행 구간",
                 detail: "현재 HIGH 태스크가 CPU를 우선 사용 중입니다.",
@@ -750,6 +965,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         if (lowRecent)
         {
+            PreemptionCurrentExecutionThreadId = PreemptionLowLastThreadId;
+            PreemptionActiveTask = "LOW Priority Worker";
+            UpdatePreemptionInspectorHighlight();
             SetPreemptionFlow(
                 headline: "LOW 작업 진행 중",
                 detail: "LOW가 작업 중이며 HIGH runnable 신호를 대기하고 있습니다.",
@@ -759,12 +977,32 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+    PreemptionCurrentExecutionThreadId = 0;
+        PreemptionActiveTask = "대기 중";
+        UpdatePreemptionInspectorHighlight();
         SetPreemptionFlow(
             headline: "다음 주기 대기",
             detail: "현재는 다음 주기 실행을 기다리는 구간입니다.",
             lowStep: false,
             yieldStep: false,
             highStep: false);
+    }
+
+    private void UpdatePreemptionInspectorHighlight()
+    {
+        var isLowActive = PreemptionActiveTask.StartsWith("LOW", StringComparison.OrdinalIgnoreCase);
+        var isHighActive = PreemptionActiveTask.StartsWith("HIGH", StringComparison.OrdinalIgnoreCase);
+        var isRunningState = !string.Equals(PreemptionActiveTask, "대기 중", StringComparison.Ordinal) &&
+                             !string.Equals(PreemptionActiveTask, "중지", StringComparison.Ordinal);
+
+        PreemptionLowInspectorBackground = isLowActive ? InspectorLowActiveBackground : InspectorIdleBackground;
+        PreemptionLowInspectorBorder = isLowActive ? InspectorLowActiveBorder : InspectorIdleBorder;
+
+        PreemptionHighInspectorBackground = isHighActive ? InspectorHighActiveBackground : InspectorIdleBackground;
+        PreemptionHighInspectorBorder = isHighActive ? InspectorHighActiveBorder : InspectorIdleBorder;
+
+        PreemptionCurrentInspectorBackground = isRunningState ? InspectorCurrentActiveBackground : InspectorIdleBackground;
+        PreemptionCurrentInspectorBorder = isRunningState ? InspectorCurrentActiveBorder : InspectorIdleBorder;
     }
 
     private void SetPreemptionFlow(string headline, string detail, bool lowStep, bool yieldStep, bool highStep)

@@ -151,7 +151,16 @@ public sealed class RtosEventFlags : IDisposable
             _waiters.Add(request);
         }
 
-        request.StartTimeout(timeout, cancellationToken);
+        try
+        {
+            request.StartTimeout(timeout, cancellationToken);
+        }
+        catch
+        {
+            RemoveWaiter(request);
+            throw;
+        }
+
         return request.Task;
     }
 
@@ -234,36 +243,44 @@ public sealed class RtosEventFlags : IDisposable
                 return;
             }
 
-            if (timeout != Timeout.InfiniteTimeSpan)
+            try
             {
-                // timeout용 취소 토큰과 외부 cancellation 토큰을 분리해
-                // timeout/cancellation/dispose 원인을 명확히 구분한다.
-                _timeoutCts = new CancellationTokenSource();
-                _timeoutRegistration = _timeoutCts.Token.Register(static state =>
+                if (timeout != Timeout.InfiniteTimeSpan)
                 {
-                    ((WaitRequest)state!).CancelDueToTimeout();
-                }, this);
-                if (Volatile.Read(ref _isCompleted) != 0)
-                {
-                    _timeoutRegistration.Dispose();
-                    _timeoutCts.Dispose();
-                    _timeoutCts = null;
-                    return;
+                    // timeout용 취소 토큰과 외부 cancellation 토큰을 분리해
+                    // timeout/cancellation/dispose 원인을 명확히 구분한다.
+                    _timeoutCts = new CancellationTokenSource();
+                    _timeoutRegistration = _timeoutCts.Token.Register(static state =>
+                    {
+                        ((WaitRequest)state!).CancelDueToTimeout();
+                    }, this);
+                    if (Volatile.Read(ref _isCompleted) != 0)
+                    {
+                        _timeoutRegistration.Dispose();
+                        _timeoutCts.Dispose();
+                        _timeoutCts = null;
+                        return;
+                    }
+
+                    _timeoutCts.CancelAfter(timeout);
                 }
 
-                _timeoutCts.CancelAfter(timeout);
+                if (cancellationToken.CanBeCanceled)
+                {
+                    _cancellationRegistration = cancellationToken.Register(static state =>
+                    {
+                        ((WaitRequest)state!).CancelDueToCancellation();
+                    }, this);
+                    if (Volatile.Read(ref _isCompleted) != 0)
+                    {
+                        _cancellationRegistration.Dispose();
+                    }
+                }
             }
-
-            if (cancellationToken.CanBeCanceled)
+            catch
             {
-                _cancellationRegistration = cancellationToken.Register(static state =>
-                {
-                    ((WaitRequest)state!).CancelDueToCancellation();
-                }, this);
-                if (Volatile.Read(ref _isCompleted) != 0)
-                {
-                    _cancellationRegistration.Dispose();
-                }
+                Cleanup();
+                throw;
             }
         }
 

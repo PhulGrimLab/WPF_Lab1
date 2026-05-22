@@ -146,6 +146,12 @@
                             <DataGridTextColumn Header="Last Done"
                                                 Binding="{Binding LastCompletedAt}"
                                                 Width="120"/>
+                            <DataGridTextColumn Header="Start TID"
+                                                Binding="{Binding LastStartedThreadId}"
+                                                Width="90"/>
+                            <DataGridTextColumn Header="Done TID"
+                                                Binding="{Binding LastCompletedThreadId}"
+                                                Width="90"/>
                             <DataGridTextColumn Header="Duration"
                                                 Binding="{Binding LastDuration}"
                                                 Width="110"/>
@@ -163,6 +169,7 @@
             <TabItem Header="선점 데모">
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -333,6 +340,10 @@
                                 <Run Text="{Binding PreemptionHighTaskName, Mode=OneWay}" FontWeight="SemiBold"/>
                                 <Run Text=")"/>
                             </TextBlock>
+                            <TextBlock Foreground="#1E3A8A"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"
+                                       Text="선점 판단 범위: RTOS 태스크(LOW/HIGH) 전용. UI 스레드는 선점 판정 대상에서 제외됩니다."/>
                             <TextBlock Text="{Binding PreemptionHealthDescription}"
                                        Foreground="#1E3A8A"
                                        FontWeight="SemiBold"
@@ -435,7 +446,95 @@
                         </Border>
                     </Grid>
 
-                        <Border Grid.Row="3"
+                    <Border Grid.Row="3"
+                            Background="White"
+                            BorderBrush="#D7DCE2"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0"
+                                       Grid.ColumnSpan="3"
+                                       Text="태스크/스레드 실시간 인스펙터"
+                                       FontWeight="SemiBold"
+                                       Foreground="#374151"
+                                       Margin="0,0,0,8"
+                                       ToolTip="현재 어떤 태스크가 동작 중인지, 마지막으로 어느 스레드에서 실행됐는지 표시합니다."/>
+
+                            <Border Grid.Row="1"
+                                    Grid.Column="0"
+                                    Background="{Binding PreemptionLowInspectorBackground}"
+                                    BorderBrush="{Binding PreemptionLowInspectorBorder}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="10"
+                                    Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="LOW Priority Worker"
+                                               FontWeight="SemiBold"
+                                               Foreground="#0F172A"/>
+                                    <TextBlock Text="{Binding PreemptionLowLastThreadId, StringFormat=마지막 실행 TID: {0}}"
+                                               Margin="0,6,0,0"
+                                               Foreground="#334155"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1"
+                                    Grid.Column="1"
+                                    Background="{Binding PreemptionHighInspectorBackground}"
+                                    BorderBrush="{Binding PreemptionHighInspectorBorder}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="10"
+                                    Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="HIGH Priority Urgent"
+                                               FontWeight="SemiBold"
+                                               Foreground="#0F172A"/>
+                                    <TextBlock Text="{Binding PreemptionHighLastThreadId, StringFormat=마지막 실행 TID: {0}}"
+                                               Margin="0,6,0,0"
+                                               Foreground="#334155"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1"
+                                    Grid.Column="2"
+                                    Background="{Binding PreemptionCurrentInspectorBackground}"
+                                    BorderBrush="{Binding PreemptionCurrentInspectorBorder}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="현재 동작 태스크"
+                                               FontWeight="SemiBold"
+                                               Foreground="#0F172A"/>
+                                    <TextBlock Text="{Binding PreemptionActiveTask}"
+                                               Margin="0,6,0,0"
+                                               Foreground="#334155"/>
+                                    <TextBlock Text="{Binding PreemptionCurrentExecutionThreadLabel, StringFormat=현재 실행 TID: {0}}"
+                                               Margin="0,6,0,0"
+                                               Foreground="#1E3A8A"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding PreemptionUiThreadId, StringFormat=참고 UI TID: {0} (선점 판단 제외)}"
+                                               Margin="0,6,0,0"
+                                               Foreground="#64748B"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                        <Border Grid.Row="4"
                             Background="White"
                             BorderBrush="#D7DCE2"
                             BorderThickness="1"
@@ -486,7 +585,7 @@
                         </DockPanel>
                     </Border>
 
-                        <Border Grid.Row="4"
+                        <Border Grid.Row="5"
                             Background="White"
                             BorderBrush="#D7DCE2"
                             BorderThickness="1"

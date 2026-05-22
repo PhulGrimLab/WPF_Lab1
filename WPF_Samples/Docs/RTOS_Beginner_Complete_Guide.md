@@ -269,6 +269,16 @@ Task.Delay 기반 소프트웨어 타이머입니다.
 가능하지만 무한대기 교착 위험이 있어 보호 로직이 들어가 있습니다.
 스케줄러 실행 컨텍스트에서 무한 타임아웃 Stop 요청은 false를 반환하도록 되어 있습니다.
 
+### Q5. GUI에서 태스크가 어떤 스레드에서 돌았는지 볼 수 있나요?
+
+가능합니다. RTOS Monitor의 DataGrid에 아래 컬럼이 있습니다.
+
+- Start TID: 해당 태스크의 마지막 시작 시점 Managed Thread ID
+- Done TID: 해당 태스크의 마지막 완료 시점 Managed Thread ID
+
+참고:
+- async/await를 사용한 태스크는 시작/완료 스레드 ID가 다를 수 있습니다.
+
 ---
 
 ## 9. 코드 읽기 추천 순서
@@ -800,3 +810,217 @@ stateDiagram-v2
 - FixedRate: 원래 시각 기준
 - FixedDelay: 완료 시각 기준
 - SkipMissedTicks: 놓친 주기 건너뛰기
+
+---
+
+## 20. 현재 코드 기준 상세 해설 (2026-05-22)
+
+이 섹션은 지금 프로젝트에 들어있는 실제 코드 흐름을 "한 줄씩 따라가기" 방식으로 설명합니다.
+
+읽는 순서는 아래처럼 추천합니다.
+
+1. SchedulerService.Start
+2. SchedulerService.RunAsync
+3. SchedulerService.CopyRunnableTasks
+4. SchedulerService.ExecuteTaskAsync
+5. SchedulerService.ScheduleNextRunIfRegistered
+6. MainWindowViewModel.StartPreemptionTestAsync
+7. MainWindowViewModel.OnPreemptionUiTimerTick
+
+### 20-1. Start를 누르면 실제로 무슨 일이 벌어지나
+
+흐름을 아주 짧게 줄이면 다음과 같습니다.
+
+1. ViewModel이 SchedulerService.Start를 호출
+2. SchedulerService가 CancellationTokenSource 생성
+3. Task.Run으로 RunAsync 루프를 백그라운드에서 시작
+4. UI는 SnapshotChanged 이벤트만 받아 화면 갱신
+
+중요한 점:
+- 태스크 실행은 백그라운드 루프에서 진행
+- WPF 컨트롤 접근은 Dispatcher를 통해서만 진행
+
+즉, "실행"과 "표시"가 분리된 구조입니다.
+
+### 20-2. RunAsync 루프는 어떤 순서로 동작하나
+
+RunAsync 한 바퀴를 의사코드로 쓰면 아래와 같습니다.
+
+```csharp
+while (!token.IsCancellationRequested)
+{
+    now = DateTimeOffset.Now;
+    runnable = CopyRunnableTasks(now);
+
+    foreach (task in runnable)
+    {
+        await ExecuteTaskAsync(task, now, token);
+    }
+
+    PublishSnapshotIfDue(now);
+    await Task.Delay(tickInterval, token);
+}
+```
+
+초보자 체크포인트:
+- runnable 태스크를 매 tick마다 다시 계산합니다.
+- 정렬 우선순위는 "Priority 내림차순 -> NextRunAt 오름차순"입니다.
+- 예외가 나도 SchedulerError 이벤트로 외부에 보고하고 루프 전체 안정성을 지키는 방향으로 작성되어 있습니다.
+
+### 20-3. CopyRunnableTasks가 lock을 2단계로 쓰는 이유
+
+처음 보면 "그냥 lock 하나로 끝내면 되지 않나?" 싶지만, 의도는 명확합니다.
+
+1단계(lock 안): 등록 목록만 빠르게 복사
+2단계(lock 밖): IsEnabled/NextRunAt 조건 계산
+3단계(lock 밖): 정렬
+
+왜 좋은가:
+- lock 점유 시간을 짧게 유지할 수 있습니다.
+- 특정 태스크의 getter가 느려도 스케줄러 전체가 장시간 잠기지 않습니다.
+
+### 20-4. ExecuteTaskAsync에서 꼭 봐야 하는 4개 지점
+
+1. MarkTaskStarted(...)
+  - 시작 시각, 스케줄 시각, 시작 스레드 TID 기록
+
+2. await task.ExecuteAsync(...)
+  - 실제 사용자 태스크 본문 실행
+
+3. MarkTaskCompleted(...) / MarkTaskFailed(...)
+  - 통계(실행시간, 오류, 종료 스레드 TID) 갱신
+
+4. finally에서 ScheduleNextRunIfRegistered(...)
+  - 성공/실패와 상관없이 다음 실행 시각 계산
+
+핵심 요약:
+- "실행"과 "다음 예약"을 finally로 분리해, 예외가 나도 스케줄러 상태가 무너지지 않게 설계했습니다.
+
+### 20-5. 협력형 선점은 어디서 결정되나
+
+협력형 선점 판단의 중심은 두 군데입니다.
+
+1. SchedulerService.ShouldYieldToHigherPriorityTask
+  - "더 높은 우선순위 + 지금 runnable"이면 true
+
+2. 태스크 본문의 context.ShouldYield() 체크
+  - true면 작업을 끊고 return하여 CPU를 양보
+
+즉, 강제 선점이 아니라 "태스크가 스스로 양보"하는 모델입니다.
+
+---
+
+## 21. 선점 데모 코드 상세 설명 (UI 스레드 제외 원칙)
+
+최근 변경의 핵심은 다음 한 문장입니다.
+
+- 선점 판단은 RTOS 태스크(LOW/HIGH) 사이에서만 수행하고, WPF UI 스레드는 판정 대상에서 제외한다.
+
+### 21-1. 왜 UI 스레드를 제외해야 하나
+
+WPF UI 스레드는 화면 이벤트 루프를 담당하는 특수 스레드입니다.
+
+이 스레드를 RTOS 선점 판정에 섞으면 아래 오해가 생깁니다.
+
+1. "UI TID가 고정인데 왜 선점이라고 하지?"
+2. "UI가 항상 최우선이면 RTOS 선점이 무의미한 것 아닌가?"
+
+그래서 현재 데모는 아래처럼 분리해서 보여줍니다.
+
+1. 현재 실행 TID: RTOS 태스크 실행 스레드
+2. 참고 UI TID: 표시만 하되 선점 판정에서는 제외
+
+### 21-2. StartPreemptionTestAsync에서 실제로 하는 일
+
+아래 4단계를 먼저 이해하면 전체가 쉬워집니다.
+
+1. 카운터/로그/트렌드 초기화
+2. 데모 전용 SchedulerService 생성
+3. LOW 태스크 등록
+  - 루프 중 context.ShouldYield()를 주기적으로 검사
+  - yield 발생 시 양보 카운트 증가 후 빠르게 return
+4. HIGH 태스크 등록
+  - 실행 횟수/실행 TID 갱신
+
+그리고 OnPreemptionUiTimerTick에서 아래를 반복합니다.
+
+1. 카운터 값을 화면 속성으로 복사
+2. 최근 tick 기반으로 현재 활성 태스크(LOW/HIGH/대기) 판정
+3. 인스펙터 카드 색상과 상태 텍스트 갱신
+
+### 21-3. 카드 색상은 어떤 기준으로 바뀌나
+
+UpdatePreemptionInspectorHighlight가 기준입니다.
+
+1. 활성 태스크가 LOW이면 LOW 카드 강조
+2. 활성 태스크가 HIGH이면 HIGH 카드 강조
+3. 대기/중지면 기본색 복귀
+4. 현재 동작 카드는 실행 중 상태일 때만 강조
+
+초보자 팁:
+- 색상 로직을 먼저 읽기보다, PreemptionActiveTask가 어디서 바뀌는지 먼저 추적하면 이해가 빠릅니다.
+
+---
+
+## 22. C# 초보자용 코드 읽기 습관 (이 프로젝트에 바로 적용)
+
+아래 5단계 습관만 지켜도 동시성 코드를 훨씬 덜 무섭게 읽을 수 있습니다.
+
+1. public 메서드 시그니처 먼저 읽기
+  - 입력/출력/예외를 먼저 파악
+
+2. 상태 필드 찾기
+  - 어떤 필드가 lock으로 보호되는지 표시
+
+3. 성공 경로 1번만 따라가기
+  - Start -> RunAsync -> ExecuteTaskAsync -> Snapshot 순서로 추적
+
+4. 실패 경로 보기
+  - catch에서 어떤 이벤트를 올리고, finally에서 무엇을 복구하는지 확인
+
+5. UI 경계 확인
+  - Dispatcher를 통하지 않는 UI 접근이 없는지 체크
+
+실전 체크리스트:
+
+- cancellationToken을 태스크 내부에서 주기적으로 확인하는가?
+- timeout과 cancellation을 같은 의미로 처리하지 않았는가?
+- dispose 후 객체 접근을 막는가?
+- snapshot은 읽기 전용으로 전달되는가?
+
+---
+
+## 23. 초보자용 미니 실습 3개 (현재 코드 그대로 확장)
+
+### 실습 1: Heartbeat 태스크 추가
+
+목표:
+- Periodic 태스크를 하나 더 추가하고 RunCount가 증가하는지 확인
+
+할 일:
+1. ScheduledTask로 Heartbeat 생성(예: 300ms)
+2. statusProvider에서 현재 상태 문자열 반환
+3. RTOS Monitor DataGrid에서 RunCount/Start TID 확인
+
+### 실습 2: OverrunPolicy 비교
+
+목표:
+- FixedRate, FixedDelay, SkipMissedTicks 차이를 체감
+
+할 일:
+1. 의도적으로 120ms 걸리는 태스크 생성
+2. period를 50ms로 설정
+3. 정책별 NextRunAt 변화와 DeadlineMissCount 비교
+
+### 실습 3: EventFlags로 HIGH 태스크 깨우기
+
+목표:
+- 태스크 간 신호 전달과 협력형 양보 흐름 이해
+
+할 일:
+1. LOW 태스크가 일정 조건에서 flags.Set(...) 호출
+2. HIGH 태스크가 WaitAnyAsync(...)로 대기
+3. 깨어난 뒤 빠르게 처리하고 완료 로그 남기기
+
+학습 포인트:
+- "대기 -> 신호 -> 실행" 흐름이 보이면 RTOS 동기화의 핵심을 잡은 것입니다.

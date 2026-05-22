@@ -374,3 +374,50 @@ primitive를 외우려고 하기보다, 문제를 먼저 분류하면 선택이 
 - Docs/RTOS_Simulator_Maturity_Checklist.md
 
 이 다섯 가지를 조합하면 대부분의 RTOS 스타일 동기화 시나리오를 표현할 수 있습니다.
+
+---
+
+## 10. 2026-05-22 실전 보강 메모
+
+최근 선점 데모 개선을 반영해, primitive를 읽을 때 아래 기준을 추가로 기억하면 좋습니다.
+
+### 10-1. UI 스레드는 동기화 판정 대상이 아니다
+
+이 프로젝트에서 primitive 동기화는 RTOS 태스크 간 협력 동작을 표현하기 위한 것입니다.
+
+즉,
+
+1. UI 스레드는 화면 표시 경계
+2. primitive 판정/선점 해석은 RTOS 태스크 경계
+
+로 분리해서 봐야 혼동이 줄어듭니다.
+
+### 10-2. 협력형 선점과 primitive의 관계
+
+`ShouldYield()`는 "양보 타이밍"을 알려주는 신호이고,
+실제 데이터/상태 동기화는 primitive가 담당합니다.
+
+예:
+
+1. LOW가 길게 실행 중 `ShouldYield()` 감지
+2. LOW가 안전 지점에서 return
+3. HIGH가 실행되어 Queue/EventFlags 처리
+
+여기서 Queue/EventFlags/Mutex가 없으면 상태 일관성이 쉽게 깨집니다.
+
+### 10-3. 초보자 관찰 지표 4개
+
+실습 중 아래 4개를 동시에 보면 학습 효과가 큽니다.
+
+1. 로그: 양보/실행 이벤트 순서
+2. 카운터: 실행 횟수, 양보 횟수
+3. TID: LOW/HIGH 마지막 실행 스레드
+4. timeout/cancel 예외: primitive 실패 원인
+
+### 10-4. 문서 간 연결
+
+1. primitive 선택: 이 문서
+2. 실행 루프/선점: `Docs/SchedulerService_Flow.md`
+3. 테스트 검증: `Docs/RTOS_Test_Guide.md`
+
+이 3개를 묶어 보면 "개념-코드-검증"이 한 번에 연결됩니다.

@@ -389,3 +389,48 @@ _scheduler.Register(new MyTask());
 예를 들어 태스크 안에서 `TextBlock.Text = "..."`처럼 직접 접근하면 문제가 생길 수 있습니다.
 
 태스크는 백그라운드 작업만 수행하고, 화면 갱신은 `SnapshotChanged`와 ViewModel을 통해 처리하는 구조가 안전합니다.
+
+---
+
+## 2026-05-22 선점 데모 연동 보강
+
+최근 샘플은 기본 3개 태스크 외에 "선점 데모"를 별도로 제공합니다.
+
+### A. 선점 데모 구성
+
+1. LOW Priority Worker
+2. HIGH Priority Urgent
+
+핵심 흐름:
+
+1. LOW가 작업을 수행
+2. HIGH가 runnable 되면 LOW가 `context.ShouldYield()`를 감지
+3. LOW가 양보(return)
+4. HIGH가 먼저 실행
+
+### B. UI에서 확인하는 포인트
+
+선점 데모 탭에서 아래를 함께 확인하면 이해가 가장 빠릅니다.
+
+1. 현재 동작 태스크
+2. LOW/HIGH 마지막 실행 TID
+3. 양보 횟수 / HIGH 실행 횟수
+4. 실시간 로그
+
+### C. UI 스레드 해석 주의
+
+현재 화면에는 "참고 UI TID"도 함께 보입니다.
+
+주의:
+
+1. UI TID는 선점 판정 대상이 아닙니다.
+2. 선점 판정은 RTOS 태스크(LOW/HIGH) 사이에서만 수행됩니다.
+
+### D. 초보자 실습 추천
+
+1. 선점 데모 시작
+2. LOW/HIGH 카드 색상 변화 관찰
+3. 로그에서 `ShouldYield` 메시지 확인
+4. 현재 실행 TID가 LOW/HIGH 중 어느 쪽으로 바뀌는지 비교
+
+이 과정을 한 번 보면 협력형 선점 개념이 빠르게 잡힙니다.
