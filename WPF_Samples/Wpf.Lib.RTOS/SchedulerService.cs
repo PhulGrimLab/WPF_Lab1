@@ -1,130 +1,300 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Wpf.Lib.RTOS
 {
-    public sealed class SchedulerService : IDisposable
+    public sealed class SchedulerService : IDisposable, IAsyncDisposable
     {
         private readonly object _syncRoot = new();
+        private readonly object _stateSyncRoot = new();
         private readonly List<IScheduledTask> _tasks = [];
+        private readonly List<IScheduledTask> _runnableBuffer = [];
+        private readonly List<IScheduledTask> _executionBuffer = [];
         private readonly Dictionary<IScheduledTask, TaskRuntimeInfo> _runtimeInfos = [];
         private readonly TimeSpan _tickInterval;
+        private readonly TimeSpan _snapshotInterval;
         private CancellationTokenSource? _cts;
         private Task? _runTask;
+        private DateTimeOffset _nextSnapshotAt = DateTimeOffset.MinValue;
+        private SchedulerRunState _state = SchedulerRunState.Stopped;
 
-        public SchedulerService(TimeSpan? tickInterval = null)
+        public SchedulerService(TimeSpan? tickInterval = null, TimeSpan? snapshotInterval = null)
         {
             _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(10);
+            _snapshotInterval = snapshotInterval ?? TimeSpan.FromMilliseconds(100);
         }
 
         public event EventHandler<SchedulerSnapshot>? SnapshotChanged;
+        public event EventHandler<Exception>? SchedulerError;
 
-        public bool IsRunning => _runTask is { IsCompleted: false };
+        public bool IsRunning
+        {
+            get
+            {
+                lock (_stateSyncRoot)
+                {
+                    return _state == SchedulerRunState.Running;
+                }
+            }
+        }
 
         public void Register(IScheduledTask task)
         {
+            ThrowIfDisposed();
+
+            ArgumentNullException.ThrowIfNull(task);
+
             lock (_syncRoot)
             {
+                if (_runtimeInfos.ContainsKey(task))
+                {
+                    return;
+                }
+
                 _tasks.Add(task);
                 _runtimeInfos[task] = new TaskRuntimeInfo();
             }
 
-            PublishSnapshot();
+            PublishSnapshot(force: true);
+        }
+
+        public bool Unregister(IScheduledTask task)
+        {
+            ThrowIfDisposed();
+
+            ArgumentNullException.ThrowIfNull(task);
+
+            var removed = false;
+
+            lock (_syncRoot)
+            {
+                removed = _tasks.Remove(task);
+                _runtimeInfos.Remove(task);
+            }
+
+            if (removed)
+            {
+                PublishSnapshot(force: true);
+            }
+
+            return removed;
+        }
+
+        public void Clear()
+        {
+            ThrowIfDisposed();
+
+            lock (_syncRoot)
+            {
+                _tasks.Clear();
+                _runtimeInfos.Clear();
+            }
+
+            PublishSnapshot(force: true);
         }
 
         public void Start()
         {
-            if (IsRunning)
+            ThrowIfDisposed();
+
+            CancellationTokenSource cts;
+
+            lock (_stateSyncRoot)
             {
-                return;
+                if (_state != SchedulerRunState.Stopped)
+                {
+                    return;
+                }
+
+                cts = new CancellationTokenSource();
+                _cts = cts;
+                _state = SchedulerRunState.Running;
+                _runTask = Task.Run(() => RunAsync(cts));
             }
 
-            _cts = new CancellationTokenSource();
-            _runTask = Task.Run(() => RunAsync(_cts.Token));
-            PublishSnapshot();
+            PublishSnapshot(force: true);
         }
 
-        public async Task StopAsync()
+        public Task StopAsync()
         {
-            if (_cts is null)
+            return StopAsync(Timeout.InfiniteTimeSpan);
+        }
+
+        public async Task<bool> StopAsync(TimeSpan timeout)
+        {
+            CancellationTokenSource? cts;
+            Task? runTask;
+
+            lock (_stateSyncRoot)
             {
-                return;
+                if (_state == SchedulerRunState.Stopped || _state == SchedulerRunState.Disposed)
+                {
+                    return true;
+                }
+
+                _state = SchedulerRunState.Stopping;
+                cts = _cts;
+                runTask = _runTask;
             }
 
-            _cts.Cancel();
+            cts?.Cancel();
+
+            if (cts is null || runTask is null)
+            {
+                CleanupStoppedScheduler(cts);
+                return true;
+            }
+
+            var stopped = await WaitForStopAsync(runTask, timeout).ConfigureAwait(false);
+
+            if (!stopped)
+            {
+                AttachCleanupContinuation(runTask, cts);
+                return false;
+            }
 
             try
             {
-                if (_runTask is not null)
-                {
-                    await _runTask.ConfigureAwait(false);
-                }
+                await runTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
             }
             finally
             {
-                _cts.Dispose();
-                _cts = null;
-                _runTask = null;
-                PublishSnapshot();
+                CleanupStoppedScheduler(cts);
             }
+
+            return true;
         }
 
         public void Dispose()
         {
-            _cts?.Cancel();
-            _cts?.Dispose();
-        }
+            CancellationTokenSource? cts;
 
-        private async Task RunAsync(CancellationToken cancellationToken)
-        {
-            while (!cancellationToken.IsCancellationRequested)
+            lock (_stateSyncRoot)
             {
-                var now = DateTimeOffset.Now;
-                var runnableTasks = GetRunnableTasks(now);
-
-                foreach (var task in runnableTasks)
+                if (_state == SchedulerRunState.Disposed)
                 {
-                    await ExecuteTaskAsync(task, now, cancellationToken).ConfigureAwait(false);
+                    return;
                 }
 
-                PublishSnapshot();
-                await Task.Delay(_tickInterval, cancellationToken).ConfigureAwait(false);
+                _state = SchedulerRunState.Disposed;
+                cts = _cts;
+                _cts = null;
+                _runTask = null;
+            }
+
+            cts?.Cancel();
+            cts?.Dispose();
+            SnapshotChanged = null;
+            SchedulerError = null;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            lock (_stateSyncRoot)
+            {
+                if (_state == SchedulerRunState.Disposed)
+                {
+                    return;
+                }
+            }
+
+            await StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            Dispose();
+        }
+
+        private async Task RunAsync(CancellationTokenSource cts)
+        {
+            var cancellationToken = cts.Token;
+
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    var now = DateTimeOffset.Now;
+                    CopyRunnableTasks(now, _executionBuffer);
+
+                    foreach (var task in _executionBuffer)
+                    {
+                        if (!IsTaskRegistered(task))
+                        {
+                            continue;
+                        }
+
+                        await ExecuteTaskAsync(task, now, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    PublishSnapshotIfDue(now);
+                    await Task.Delay(_tickInterval, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                RaiseSchedulerError(ex);
+            }
+            finally
+            {
+                CleanupStoppedScheduler(cts);
             }
         }
 
-        private IReadOnlyList<IScheduledTask> GetRunnableTasks(DateTimeOffset now)
+        private void CopyRunnableTasks(DateTimeOffset now, List<IScheduledTask> destination)
         {
             lock (_syncRoot)
             {
-                return _tasks
-                    .Where(task => task.IsEnabled && task.NextRunAt <= now)
-                    .OrderByDescending(task => task.Priority)
-                    .ThenBy(task => task.NextRunAt)
-                    .ToList();
+                _runnableBuffer.Clear();
+
+                foreach (var task in _tasks)
+                {
+                    _runnableBuffer.Add(task);
+                }
             }
+
+            destination.Clear();
+
+            foreach (var task in _runnableBuffer)
+            {
+                if (task.IsEnabled && task.NextRunAt <= now)
+                {
+                    destination.Add(task);
+                }
+            }
+
+            destination.Sort(CompareRunnableTasks);
+        }
+
+        private bool IsTaskRegistered(IScheduledTask task)
+        {
+            lock (_syncRoot)
+            {
+                return _runtimeInfos.ContainsKey(task);
+            }
+        }
+
+        private static int CompareRunnableTasks(IScheduledTask x, IScheduledTask y)
+        {
+            var priorityComparison = y.Priority.CompareTo(x.Priority);
+            return priorityComparison != 0
+                ? priorityComparison
+                : x.NextRunAt.CompareTo(y.NextRunAt);
         }
 
         private async Task ExecuteTaskAsync(IScheduledTask task, DateTimeOffset now, CancellationToken cancellationToken)
         {
             var stopwatch = Stopwatch.StartNew();
-            var runtimeInfo = GetRuntimeInfo(task);
 
-            runtimeInfo.LastStartedAt = now;
+            MarkTaskStarted(task, now);
 
             try
             {
                 await task.ExecuteAsync(new SchedulerContext(now), cancellationToken).ConfigureAwait(false);
 
-                runtimeInfo.RunCount++;
-                runtimeInfo.LastCompletedAt = DateTimeOffset.Now;
-                runtimeInfo.LastError = null;
+                stopwatch.Stop();
+                MarkTaskCompleted(task, DateTimeOffset.Now, stopwatch.Elapsed);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -132,51 +302,119 @@ namespace Wpf.Lib.RTOS
             }
             catch (Exception ex)
             {
-                runtimeInfo.LastCompletedAt = DateTimeOffset.Now;
-                runtimeInfo.LastError = ex.Message;
+                stopwatch.Stop();
+                MarkTaskFailed(task, DateTimeOffset.Now, stopwatch.Elapsed, ex.Message);
+                RaiseSchedulerError(ex);
             }
             finally
             {
-                stopwatch.Stop();
-                runtimeInfo.LastDuration = stopwatch.Elapsed;
-                ScheduleNextRun(task, now);
+                ScheduleNextRunIfRegistered(task, now);
             }
         }
 
-        private TaskRuntimeInfo GetRuntimeInfo(IScheduledTask task)
+        private void MarkTaskStarted(IScheduledTask task, DateTimeOffset now)
         {
             lock (_syncRoot)
             {
-                return _runtimeInfos[task];
+                if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
+                {
+                    runtimeInfo.MarkStarted(now);
+                }
             }
         }
 
-        private static void ScheduleNextRun(IScheduledTask task, DateTimeOffset now)
+        private void MarkTaskCompleted(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration)
         {
-            task.NextRunAt = task.Mode == Enum_TaskExecutionMode.Periodic
-                ? now + task.Period
-                : DateTimeOffset.MaxValue;
+            lock (_syncRoot)
+            {
+                if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
+                {
+                    runtimeInfo.MarkCompleted(completedAt, duration);
+                }
+            }
         }
 
-        private void PublishSnapshot()
+        private void MarkTaskFailed(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, string error)
         {
-            SchedulerSnapshot snapshot;
+            lock (_syncRoot)
+            {
+                if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
+                {
+                    runtimeInfo.MarkFailed(completedAt, duration, error);
+                }
+            }
+        }
+
+        private void ScheduleNextRunIfRegistered(IScheduledTask task, DateTimeOffset now)
+        {
+            lock (_syncRoot)
+            {
+                if (!_runtimeInfos.ContainsKey(task))
+                {
+                    return;
+                }
+
+                task.NextRunAt = task.Mode == Enum_TaskExecutionMode.Periodic
+                    ? now + task.Period
+                    : DateTimeOffset.MaxValue;
+            }
+        }
+
+        private void PublishSnapshotIfDue(DateTimeOffset now)
+        {
+            if (now < _nextSnapshotAt)
+            {
+                return;
+            }
+
+            _nextSnapshotAt = now + _snapshotInterval;
+            PublishSnapshot();
+        }
+
+        private void PublishSnapshot(bool force = false)
+        {
+            if (force)
+            {
+                _nextSnapshotAt = DateTimeOffset.Now + _snapshotInterval;
+            }
+
+            var taskSnapshots = CreateTaskSnapshots();
+
+            RaiseSnapshotChanged(new SchedulerSnapshot(
+                DateTimeOffset.Now,
+                IsRunning,
+                taskSnapshots));
+        }
+
+        private IReadOnlyList<ScheduledTaskSnapshot> CreateTaskSnapshots()
+        {
+            List<(IScheduledTask Task, TaskRuntimeSnapshot Runtime)> snapshotSources;
 
             lock (_syncRoot)
             {
-                snapshot = new SchedulerSnapshot(
-                    DateTimeOffset.Now,
-                    IsRunning,
-                    _tasks.Select(CreateTaskSnapshot).ToList());
+                snapshotSources = new List<(IScheduledTask Task, TaskRuntimeSnapshot Runtime)>(_tasks.Count);
+
+                foreach (var task in _tasks)
+                {
+                    if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
+                    {
+                        snapshotSources.Add((task, runtimeInfo.ToSnapshot()));
+                    }
+                }
             }
 
-            SnapshotChanged?.Invoke(this, snapshot);
+            var snapshots = new List<ScheduledTaskSnapshot>(snapshotSources.Count);
+
+            foreach (var source in snapshotSources)
+            {
+                snapshots.Add(CreateTaskSnapshot(source.Task, source.Runtime));
+            }
+
+            return snapshots;
         }
 
-        private ScheduledTaskSnapshot CreateTaskSnapshot(IScheduledTask task)
+        private static ScheduledTaskSnapshot CreateTaskSnapshot(IScheduledTask task, TaskRuntimeSnapshot runtimeInfo)
         {
-            var runtimeInfo = _runtimeInfos[task];
-
             return new ScheduledTaskSnapshot(
                 task.Name,
                 task.Priority,
@@ -190,6 +428,127 @@ namespace Wpf.Lib.RTOS
                 runtimeInfo.LastCompletedAt,
                 runtimeInfo.LastDuration,
                 runtimeInfo.LastError);
+        }
+
+        private static async Task<bool> WaitForStopAsync(Task runTask, TimeSpan timeout)
+        {
+            if (timeout == Timeout.InfiniteTimeSpan)
+            {
+                await Task.WhenAny(runTask).ConfigureAwait(false);
+                return true;
+            }
+
+            if (timeout < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative or Timeout.InfiniteTimeSpan.");
+            }
+
+            using var delayCts = new CancellationTokenSource();
+            var delayTask = Task.Delay(timeout, delayCts.Token);
+            var completedTask = await Task.WhenAny(runTask, delayTask).ConfigureAwait(false);
+
+            if (completedTask == runTask)
+            {
+                delayCts.Cancel();
+            }
+
+            return completedTask == runTask;
+        }
+
+        private void AttachCleanupContinuation(Task runTask, CancellationTokenSource cts)
+        {
+            _ = runTask.ContinueWith(
+                _ => CleanupStoppedScheduler(cts),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        private void CleanupStoppedScheduler(CancellationTokenSource? cts)
+        {
+            var shouldPublish = false;
+
+            lock (_stateSyncRoot)
+            {
+                if (cts is not null && !ReferenceEquals(_cts, cts))
+                {
+                    return;
+                }
+
+                cts?.Dispose();
+                _cts = null;
+                _runTask = null;
+
+                if (_state != SchedulerRunState.Disposed)
+                {
+                    _state = SchedulerRunState.Stopped;
+                    shouldPublish = true;
+                }
+            }
+
+            if (shouldPublish)
+            {
+                PublishSnapshot(force: true);
+            }
+        }
+
+        private void RaiseSnapshotChanged(SchedulerSnapshot snapshot)
+        {
+            var handlers = SnapshotChanged;
+            if (handlers is null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<SchedulerSnapshot> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, snapshot);
+                }
+                catch (Exception ex)
+                {
+                    RaiseSchedulerError(ex);
+                }
+            }
+        }
+
+        private void RaiseSchedulerError(Exception exception)
+        {
+            var handlers = SchedulerError;
+            if (handlers is null)
+            {
+                Debug.WriteLine(exception);
+                return;
+            }
+
+            foreach (EventHandler<Exception> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, exception);
+                }
+                catch
+                {
+                    Debug.WriteLine(exception);
+                }
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            lock (_stateSyncRoot)
+            {
+                ObjectDisposedException.ThrowIf(_state == SchedulerRunState.Disposed, this);
+            }
+        }
+
+        private enum SchedulerRunState
+        {
+            Stopped,
+            Running,
+            Stopping,
+            Disposed
         }
     }
 }

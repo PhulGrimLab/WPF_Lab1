@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Wpf.Lib.RTOS
 {
-    public sealed class ScheduledTask : IScheduledTask
+    public sealed class ScheduledTask : SchedulerTaskBase
     {
         private readonly Func<SchedulerContext, CancellationToken, Task> _executeAsync;
         private readonly Func<string>? _statusProvider;
@@ -18,25 +18,15 @@ namespace Wpf.Lib.RTOS
             Enum_TaskExecutionMode mode,
             Func<SchedulerContext, CancellationToken, Task> executeAsync,
             Func<string>? statusProvider = null)
+            : base(name, priority, period, mode)
         {
-            Name = name;
-            Priority = priority;
-            Period = period;
-            Mode = mode;
-            _executeAsync = executeAsync;
+            _executeAsync = executeAsync ?? throw new ArgumentNullException(nameof(executeAsync));
             _statusProvider = statusProvider;
-            NextRunAt = DateTimeOffset.Now;
         }
 
-        public string Name { get; }
-        public Enum_TaskPriority Priority { get; }
-        public TimeSpan Period { get; }
-        public Enum_TaskExecutionMode Mode { get; }
-        public DateTimeOffset NextRunAt { get; set; }
-        public bool IsEnabled { get; set; } = true;
-        public string Status => _statusProvider?.Invoke() ?? string.Empty;
+        public override string Status => _statusProvider?.Invoke() ?? string.Empty;
 
-        public Task ExecuteAsync(SchedulerContext context, CancellationToken cancellationToken)
+        public override Task ExecuteAsync(SchedulerContext context, CancellationToken cancellationToken)
         {
             return _executeAsync(context, cancellationToken);
         }

@@ -11,6 +11,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly SchedulerService _scheduler = new();
     private readonly Dispatcher _dispatcher;
+    private readonly object _snapshotSyncRoot = new();
+    private readonly Dictionary<string, ScheduledTaskStatusViewModel> _taskViewModels = [];
+    private SchedulerSnapshot? _latestSnapshot;
+    private bool _isSnapshotApplyQueued;
     private string _schedulerState = "Stopped";
     private string _lastSnapshotAt = "-";
 
@@ -92,19 +96,54 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
     {
-        _dispatcher.BeginInvoke(() =>
+        lock (_snapshotSyncRoot)
         {
-            SchedulerState = snapshot.IsRunning ? "Running" : "Stopped";
-            LastSnapshotAt = snapshot.CreatedAt.LocalDateTime.ToString("HH:mm:ss.fff");
+            _latestSnapshot = snapshot;
 
-            Tasks.Clear();
-            foreach (var task in snapshot.Tasks)
+            if (_isSnapshotApplyQueued)
             {
-                Tasks.Add(new ScheduledTaskStatusViewModel(task));
+                return;
             }
 
-            RefreshCommandStates();
-        });
+            _isSnapshotApplyQueued = true;
+        }
+
+        _dispatcher.BeginInvoke(ApplyLatestSnapshot, DispatcherPriority.Background);
+    }
+
+    private void ApplyLatestSnapshot()
+    {
+        SchedulerSnapshot? snapshot;
+
+        lock (_snapshotSyncRoot)
+        {
+            snapshot = _latestSnapshot;
+            _latestSnapshot = null;
+            _isSnapshotApplyQueued = false;
+        }
+
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        SchedulerState = snapshot.IsRunning ? "Running" : "Stopped";
+        LastSnapshotAt = snapshot.CreatedAt.LocalDateTime.ToString("HH:mm:ss.fff");
+
+        foreach (var task in snapshot.Tasks)
+        {
+            if (_taskViewModels.TryGetValue(task.Name, out var taskViewModel))
+            {
+                taskViewModel.Update(task);
+                continue;
+            }
+
+            taskViewModel = new ScheduledTaskStatusViewModel(task);
+            _taskViewModels[task.Name] = taskViewModel;
+            Tasks.Add(taskViewModel);
+        }
+
+        RefreshCommandStates();
     }
 
     private void RefreshCommandStates()
