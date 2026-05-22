@@ -10,6 +10,7 @@ namespace Wpf.Lib.RTOS
         private readonly List<IScheduledTask> _runnableBuffer = [];
         private readonly List<IScheduledTask> _executionBuffer = [];
         private readonly Dictionary<IScheduledTask, TaskRuntimeInfo> _runtimeInfos = [];
+        private static readonly AsyncLocal<bool> s_isSchedulerExecution = new();
         private readonly TimeSpan _tickInterval;
         private readonly TimeSpan _snapshotInterval;
         private CancellationTokenSource? _cts;
@@ -140,6 +141,7 @@ namespace Wpf.Lib.RTOS
 
             CancellationTokenSource? cts;
             Task? runTask;
+            var rejectSelfInfiniteStop = false;
 
             lock (_stateSyncRoot)
             {
@@ -148,9 +150,28 @@ namespace Wpf.Lib.RTOS
                     return true;
                 }
 
-                _state = SchedulerRunState.Stopping;
-                cts = _cts;
-                runTask = _runTask;
+                if (timeout == Timeout.InfiniteTimeSpan && s_isSchedulerExecution.Value)
+                {
+                    rejectSelfInfiniteStop = true;
+                }
+
+                if (rejectSelfInfiniteStop)
+                {
+                    cts = null;
+                    runTask = null;
+                }
+                else
+                {
+                    _state = SchedulerRunState.Stopping;
+                    cts = _cts;
+                    runTask = _runTask;
+                }
+            }
+
+            if (rejectSelfInfiniteStop)
+            {
+                TraceLog.Add("Scheduler", "StopAsync with infinite timeout was rejected from scheduler execution context.");
+                return false;
             }
 
             cts?.Cancel();
@@ -187,6 +208,23 @@ namespace Wpf.Lib.RTOS
 
         public void Dispose()
         {
+            lock (_stateSyncRoot)
+            {
+                if (_state == SchedulerRunState.Disposed)
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                _ = StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Dispose 경로에서는 종료 시도를 우선하고, 최종 정리는 아래에서 계속 진행한다.
+            }
+
             CancellationTokenSource? cts;
             Task? runTask;
 
@@ -233,6 +271,8 @@ namespace Wpf.Lib.RTOS
 
             try
             {
+                s_isSchedulerExecution.Value = true;
+
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     var now = DateTimeOffset.Now;
@@ -261,6 +301,7 @@ namespace Wpf.Lib.RTOS
             }
             finally
             {
+                s_isSchedulerExecution.Value = false;
                 CleanupStoppedScheduler(cts);
             }
         }
@@ -324,7 +365,10 @@ namespace Wpf.Lib.RTOS
 
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
-                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), GetScheduledState(task, completedAt));
+                
+                // Periodic 태스크는 Ready 상태로, OneShot 태스크는 Suspended 상태로 전환
+                var nextState = CalculateNextTaskState(task, completedAt);
+                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState);
                 TraceLog.Add("Task", $"Task execution completed in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -335,7 +379,8 @@ namespace Wpf.Lib.RTOS
             {
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
-                MarkTaskFailed(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), ex.Message, GetScheduledState(task, completedAt));
+                var nextState = CalculateNextTaskState(task, completedAt);
+                MarkTaskFailed(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), ex.Message, nextState);
                 TraceLog.Add("Task", $"Task execution failed: {ex.Message}", GetTaskName(task));
                 RaiseSchedulerError(ex);
             }
@@ -391,7 +436,17 @@ namespace Wpf.Lib.RTOS
                 var period = TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero);
                 var overrunPolicy = TryGetTaskValue(task, candidate => candidate.OverrunPolicy, Enum_TaskOverrunPolicy.FixedRate);
 
-                task.NextRunAt = GetNextRunAt(mode, overrunPolicy, period, scheduledAt, completedAt);
+                // OneShot 태스크는 한 번 실행 후 자동으로 비활성화
+                if (mode == Enum_TaskExecutionMode.OneShot)
+                {
+                    task.SetEnabled(false);
+                    task.NextRunAt = DateTimeOffset.MaxValue;
+                    TraceLog.Add("Scheduler", "OneShot task completed and disabled.", GetTaskName(task));
+                }
+                else
+                {
+                    task.NextRunAt = GetNextRunAt(mode, overrunPolicy, period, scheduledAt, completedAt);
+                }
             }
         }
 
@@ -476,16 +531,22 @@ namespace Wpf.Lib.RTOS
                 runtimeInfo.LastError);
         }
 
-        private static Enum_TaskState GetScheduledState(IScheduledTask task, DateTimeOffset now)
+        /// <summary>
+        /// 태스크 실행 후 다음 상태를 계산합니다.
+        /// Periodic 태스크는 Ready 상태로, OneShot 태스크는 Suspended 상태로 전환합니다.
+        /// </summary>
+        private static Enum_TaskState CalculateNextTaskState(IScheduledTask task, DateTimeOffset completedAt)
         {
-            if (!TryGetTaskValue(task, candidate => candidate.IsEnabled, false))
+            var mode = TryGetTaskValue(task, candidate => candidate.Mode, Enum_TaskExecutionMode.OneShot);
+            var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
+
+            if (mode == Enum_TaskExecutionMode.OneShot)
             {
                 return Enum_TaskState.Suspended;
             }
 
-            return TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue) <= now
-                ? Enum_TaskState.Ready
-                : Enum_TaskState.Blocked;
+            // Periodic 태스크는 enabled 여부에 따라 Ready 또는 Suspended
+            return isEnabled ? Enum_TaskState.Ready : Enum_TaskState.Suspended;
         }
 
         private static DateTimeOffset GetNextRunAt(

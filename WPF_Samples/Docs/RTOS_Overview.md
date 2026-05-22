@@ -1,5 +1,12 @@
 # Wpf.Lib.RTOS 개요
 
+## 안내
+
+더 자세한 초보자용 통합 설명서는 다음 문서를 참고하세요.
+
+- Docs/RTOS_Beginner_Complete_Guide.md
+- Docs/RTOS_Primitives_Deep_Dive.md
+
 이 문서는 `Wpf.Lib.RTOS` 라이브러리를 C# 초보자도 이해할 수 있도록 설명하기 위한 문서입니다.
 
 이 라이브러리는 실제 RTOS를 그대로 구현한 것은 아니고, WPF 샘플 프로그램에서 여러 작업을 정해진 주기와 우선순위에 따라 실행하기 위한 "RTOS 스타일 스케줄러"입니다.

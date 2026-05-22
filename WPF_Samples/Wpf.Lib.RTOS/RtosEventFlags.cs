@@ -1,15 +1,18 @@
 namespace Wpf.Lib.RTOS;
 
-public sealed class RtosEventFlags
+public sealed class RtosEventFlags : IDisposable
 {
     private readonly object _syncRoot = new();
     private readonly List<WaitRequest> _waiters = [];
     private uint _flags;
+    private int _isDisposed;
 
     public uint CurrentFlags
     {
         get
         {
+            ThrowIfDisposed();
+
             lock (_syncRoot)
             {
                 return _flags;
@@ -19,6 +22,8 @@ public sealed class RtosEventFlags
 
     public void Set(uint flags)
     {
+        ThrowIfDisposed();
+
         if (flags == 0)
         {
             return;
@@ -40,6 +45,8 @@ public sealed class RtosEventFlags
 
     public void Clear(uint flags)
     {
+        ThrowIfDisposed();
+
         lock (_syncRoot)
         {
             _flags &= ~flags;
@@ -48,12 +55,36 @@ public sealed class RtosEventFlags
 
     public Task<uint> WaitAnyAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         return WaitAsync(flags, waitAll: false, autoClear, timeout, cancellationToken);
     }
 
     public Task<uint> WaitAllAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         return WaitAsync(flags, waitAll: true, autoClear, timeout, cancellationToken);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        List<WaitRequest> waitersToCancel;
+
+        lock (_syncRoot)
+        {
+            waitersToCancel = [.. _waiters];
+            _waiters.Clear();
+            _flags = 0;
+        }
+
+        foreach (var waiter in waitersToCancel)
+        {
+            waiter.CancelDueToDispose();
+        }
     }
 
     private Task<uint> WaitAsync(uint flags, bool waitAll, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken)
@@ -72,6 +103,13 @@ public sealed class RtosEventFlags
 
         lock (_syncRoot)
         {
+            // Dispose와 경합하는 경우 lock 안에서 상태를 다시 확인해
+            // dispose 이후 waiter가 목록에 남는 것을 방지한다.
+            if (Volatile.Read(ref _isDisposed) != 0)
+            {
+                throw new ObjectDisposedException(nameof(RtosEventFlags));
+            }
+
             var matched = GetMatchedFlags(flags, waitAll);
             if (matched != 0)
             {
@@ -129,6 +167,11 @@ public sealed class RtosEventFlags
         }
     }
 
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
+    }
+
     private sealed class WaitRequest
     {
         private readonly RtosEventFlags _owner;
@@ -169,7 +212,7 @@ public sealed class RtosEventFlags
                 _timeoutCts = new CancellationTokenSource();
                 _timeoutRegistration = _timeoutCts.Token.Register(static state =>
                 {
-                    ((WaitRequest)state!).Cancel();
+                    ((WaitRequest)state!).CancelDueToTimeout();
                 }, this);
                 if (Volatile.Read(ref _isCompleted) != 0)
                 {
@@ -186,7 +229,7 @@ public sealed class RtosEventFlags
             {
                 _cancellationRegistration = cancellationToken.Register(static state =>
                 {
-                    ((WaitRequest)state!).Cancel();
+                    ((WaitRequest)state!).CancelDueToCancellation();
                 }, this);
                 if (Volatile.Read(ref _isCompleted) != 0)
                 {
@@ -206,7 +249,7 @@ public sealed class RtosEventFlags
             _completion.TrySetResult(MatchedFlags);
         }
 
-        private void Cancel()
+        private void CancelDueToCancellation()
         {
             if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
             {
@@ -216,6 +259,29 @@ public sealed class RtosEventFlags
             _owner.RemoveWaiter(this);
             Cleanup();
             _completion.TrySetCanceled();
+        }
+
+        private void CancelDueToTimeout()
+        {
+            if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
+            {
+                return;
+            }
+
+            _owner.RemoveWaiter(this);
+            Cleanup();
+            _completion.TrySetException(new TimeoutException("Event flags wait timed out."));
+        }
+
+        public void CancelDueToDispose()
+        {
+            if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
+            {
+                return;
+            }
+
+            Cleanup();
+            _completion.TrySetException(new ObjectDisposedException(nameof(RtosEventFlags)));
         }
 
         private void Cleanup()

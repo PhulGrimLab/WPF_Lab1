@@ -32,6 +32,8 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         }
     }
 
+    public event EventHandler<Exception>? TimerError;
+
     public void Start()
     {
         lock (_syncRoot)
@@ -102,9 +104,48 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
         do
         {
             await Task.Delay(_period, cancellationToken).ConfigureAwait(false);
-            await _callback(cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await _callback(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                RaiseTimerError(ex);
+
+                // One-shot 타이머는 콜백 실패 시 종료하고,
+                // periodic 타이머는 다음 주기에 계속 실행한다.
+                if (!_isPeriodic)
+                {
+                    break;
+                }
+            }
         }
         while (_isPeriodic && !cancellationToken.IsCancellationRequested);
+    }
+
+    private void RaiseTimerError(Exception exception)
+    {
+        var handlers = TimerError;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (EventHandler<Exception> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, exception);
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static void DisposeCancellationSourceWhenStopped(Task? runTask, CancellationTokenSource? cts)

@@ -20,5 +20,10 @@ namespace Wpf.Lib.RTOS
         string Status { get; }
 
         Task ExecuteAsync(SchedulerContext context, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// 태스크의 활성 상태를 설정합니다.
+        /// </summary>
+        void SetEnabled(bool isEnabled);
     }
 }

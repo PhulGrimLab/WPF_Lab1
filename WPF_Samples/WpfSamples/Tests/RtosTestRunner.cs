@@ -21,9 +21,12 @@ internal static class RtosTestRunner
             ("EventFlags wait-all waits for all flags", EventFlagsWaitAllCompletesAsync),
             ("EventFlags wait observes timeout", EventFlagsWaitObservesTimeoutAsync),
             ("EventFlags wait observes cancellation", EventFlagsWaitObservesCancellationAsync),
+            ("EventFlags dispose cancels pending wait", EventFlagsDisposeCancelsPendingWaitAsync),
             ("Mutex tracks owner and priority inheritance", MutexTracksOwnerAndPriorityInheritanceAsync),
+            ("Mutex throws after dispose", MutexThrowsAfterDisposeAsync),
             ("SoftwareTimer one-shot fires once", SoftwareTimerOneShotFiresOnceAsync),
             ("SoftwareTimer periodic fires repeatedly", SoftwareTimerPeriodicFiresRepeatedlyAsync),
+            ("SoftwareTimer periodic survives callback errors", SoftwareTimerPeriodicSurvivesCallbackErrorsAsync),
             ("SoftwareTimer dispose does not throw while callback runs", SoftwareTimerDisposeDoesNotThrowWhileCallbackRunsAsync),
             ("TickCounter converts time to ticks", TickCounterAsync),
             ("TickCounter rejects overflow tick", TickCounterRejectsOverflowTickAsync),
@@ -31,6 +34,7 @@ internal static class RtosTestRunner
             ("Scheduler runs higher priority task first", SchedulerRunsHigherPriorityTaskFirstAsync),
             ("Scheduler executes one-shot task once", SchedulerExecutesOneShotTaskOnceAsync),
             ("Scheduler stop timeout returns false", SchedulerStopTimeoutReturnsFalseAsync),
+            ("Scheduler self stop with infinite timeout returns false", SchedulerSelfStopInfiniteTimeoutReturnsFalseAsync),
             ("Scheduler stop honors cancellation", SchedulerStopHonorsCancellationAsync),
             ("Scheduler unregister prevents future execution", SchedulerUnregisterPreventsFutureExecutionAsync),
             ("Scheduler clear removes all tasks", SchedulerClearRemovesAllTasksAsync),
@@ -196,9 +200,9 @@ internal static class RtosTestRunner
     {
         var eventFlags = new RtosEventFlags();
 
-        await RtosAssert.ThrowsAsync<OperationCanceledException>(
+        await RtosAssert.ThrowsAsync<TimeoutException>(
             () => eventFlags.WaitAnyAsync(0b0001, autoClear: false, TimeSpan.FromMilliseconds(20)),
-            "Event flag wait should cancel when timeout elapses.").ConfigureAwait(false);
+            "Event flag wait should throw timeout when timeout elapses.").ConfigureAwait(false);
     }
 
     private static async Task EventFlagsWaitObservesCancellationAsync()
@@ -211,9 +215,25 @@ internal static class RtosTestRunner
             "Event flag wait should observe external cancellation.").ConfigureAwait(false);
     }
 
+    private static async Task EventFlagsDisposeCancelsPendingWaitAsync()
+    {
+        var eventFlags = new RtosEventFlags();
+        var waitTask = eventFlags.WaitAllAsync(0b0011, autoClear: false, Timeout.InfiniteTimeSpan);
+
+        eventFlags.Dispose();
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => waitTask,
+            "Disposing EventFlags should complete pending waits with ObjectDisposedException.").ConfigureAwait(false);
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => eventFlags.WaitAnyAsync(0b0001, autoClear: false, TimeSpan.FromMilliseconds(10)),
+            "Disposed EventFlags should reject new waits.").ConfigureAwait(false);
+    }
+
     private static async Task MutexTracksOwnerAndPriorityInheritanceAsync()
     {
-        var mutex = new RtosMutex();
+        using var mutex = new RtosMutex();
 
         var acquiredByLow = await mutex.WaitAsync("LowTask", Enum_TaskPriority.Low, TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
         var highWait = mutex.WaitAsync("HighTask", Enum_TaskPriority.Critical, TimeSpan.FromMilliseconds(80));
@@ -231,6 +251,20 @@ internal static class RtosTestRunner
         RtosAssert.Equal("HighTask", mutex.Owner, "Mutex owner should move to the next acquirer.");
 
         mutex.Release("HighTask");
+    }
+
+    private static async Task MutexThrowsAfterDisposeAsync()
+    {
+        var mutex = new RtosMutex();
+        mutex.Dispose();
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => mutex.WaitAsync("DisposedOwner", Enum_TaskPriority.Normal, TimeSpan.FromMilliseconds(10)),
+            "Disposed mutex should reject WaitAsync.").ConfigureAwait(false);
+
+        RtosAssert.Throws<ObjectDisposedException>(
+            () => mutex.Release("DisposedOwner"),
+            "Disposed mutex should reject Release.");
     }
 
     private static async Task SoftwareTimerOneShotFiresOnceAsync()
@@ -268,6 +302,35 @@ internal static class RtosTestRunner
         await timer.StopAsync().ConfigureAwait(false);
 
         RtosAssert.True(Volatile.Read(ref fireCount) >= 2, "Periodic software timer should fire repeatedly.");
+    }
+
+    private static async Task SoftwareTimerPeriodicSurvivesCallbackErrorsAsync()
+    {
+        var fireCount = 0;
+        var errorCount = 0;
+
+        await using var timer = new RtosSoftwareTimer(
+            TimeSpan.FromMilliseconds(10),
+            isPeriodic: true,
+            _ =>
+            {
+                var count = Interlocked.Increment(ref fireCount);
+                if (count == 1)
+                {
+                    throw new InvalidOperationException("First tick failure");
+                }
+
+                return Task.CompletedTask;
+            });
+
+        timer.TimerError += (_, _) => Interlocked.Increment(ref errorCount);
+
+        timer.Start();
+        await Task.Delay(80).ConfigureAwait(false);
+        await timer.StopAsync().ConfigureAwait(false);
+
+        RtosAssert.True(Volatile.Read(ref fireCount) >= 2, "Periodic timer should continue after callback errors.");
+        RtosAssert.True(Volatile.Read(ref errorCount) >= 1, "Timer should report callback errors via TimerError.");
     }
 
     private static async Task SoftwareTimerDisposeDoesNotThrowWhileCallbackRunsAsync()
@@ -410,6 +473,35 @@ internal static class RtosTestRunner
         var stopped = await scheduler.StopAsync(TimeSpan.FromMilliseconds(20)).ConfigureAwait(false);
 
         RtosAssert.True(!stopped, "StopAsync(timeout) should return false when a task ignores cancellation and keeps running.");
+    }
+
+    private static async Task SchedulerSelfStopInfiniteTimeoutReturnsFalseAsync()
+    {
+        var selfStopResult = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var scheduler = new SchedulerService(
+            tickInterval: TimeSpan.FromMilliseconds(5),
+            snapshotInterval: TimeSpan.FromMilliseconds(20));
+
+        scheduler.Register(new ScheduledTask(
+            "Self Stop",
+            Enum_TaskPriority.Normal,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.OneShot,
+            async (_, _) =>
+            {
+                var stopped = await scheduler.StopAsync(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
+                selfStopResult.TrySetResult(stopped);
+            }));
+
+        scheduler.Start();
+
+        var completed = await Task.WhenAny(selfStopResult.Task, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
+        RtosAssert.True(completed == selfStopResult.Task, "Self-stop result should complete without deadlock.");
+        RtosAssert.True(!selfStopResult.Task.Result, "Self-stop with infinite timeout should return false to avoid deadlock.");
+
+        var stoppedOutside = await scheduler.StopAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        RtosAssert.True(stoppedOutside, "Scheduler should stop normally when requested outside the scheduler execution context.");
     }
 
     private static async Task SchedulerStopHonorsCancellationAsync()
@@ -805,6 +897,10 @@ internal static class RtosTestRunner
         public Task ExecuteAsync(SchedulerContext context, CancellationToken cancellationToken)
         {
             return Task.CompletedTask;
+        }
+        public void SetEnabled(bool isEnabled)
+        {
+            // 테스트 태스크이므로 no-op
         }
     }
 }
