@@ -438,3 +438,185 @@ stateDiagram-v2
 동기화 primitive를 더 깊게 학습하려면 아래 문서를 이어서 읽으세요.
 
 - Docs/RTOS_Primitives_Deep_Dive.md
+- Docs/RTOS_Simulator_Maturity_Checklist.md
+
+---
+
+## 17. RTOS 함수별 코드 설명 사전
+
+아래는 현재 `Wpf.Lib.RTOS`의 공개 API를 기준으로, 초보자 눈높이에서 각 함수의 역할을 정리한 빠른 참고표입니다.
+
+### 17-1. SchedulerService
+
+- SchedulerService(TimeSpan? tickInterval = null, TimeSpan? snapshotInterval = null)
+  - 스케줄러 엔진 생성자입니다.
+  - tickInterval은 실행 루프 지연 주기, snapshotInterval은 UI 갱신 이벤트 발행 주기입니다.
+
+- Register(IScheduledTask task)
+  - 태스크를 스케줄러에 등록합니다.
+  - 중복 등록은 무시되고, 등록 후 즉시 스냅샷이 갱신됩니다.
+
+- Unregister(IScheduledTask task)
+  - 등록된 태스크를 제거합니다.
+  - 제거 성공 시 true, 없으면 false를 반환합니다.
+
+- Clear()
+  - 등록된 태스크와 런타임 통계를 모두 초기화합니다.
+
+- Start()
+  - 백그라운드 실행 루프를 시작합니다.
+  - 이미 실행 중이면 아무 작업도 하지 않습니다.
+
+- StopAsync()
+  - 무한 타임아웃으로 정상 종료를 기다립니다.
+
+- StopAsync(TimeSpan timeout)
+  - 지정 시간 내 종료를 시도합니다.
+  - 시간 초과 시 false를 반환하고, 내부 정리는 continuation으로 이어집니다.
+
+- Dispose()
+  - 동기 dispose 경로입니다.
+  - 내부적으로 중지를 시도하고 이벤트 핸들러를 정리합니다.
+
+- DisposeAsync()
+  - 비동기 dispose 경로입니다.
+  - StopAsync 후 Dispose를 호출해 리소스를 정리합니다.
+
+### 17-2. SchedulerContext
+
+- SchedulerContext(DateTimeOffset now, Func<bool>? shouldYield = null)
+  - 태스크 실행 컨텍스트를 생성합니다.
+  - now는 현재 스케줄 시각, shouldYield는 협력형 선점 확인 콜백입니다.
+
+- ShouldYield()
+  - 현재 태스크가 더 높은 우선순위 태스크에게 양보해야 하는지 확인합니다.
+  - true면 태스크 코드가 작업을 쪼개어 빠르게 반환하는 것이 권장됩니다.
+
+### 17-3. IScheduledTask / SchedulerTaskBase / ScheduledTask
+
+- SetEnabled(bool isEnabled)
+  - 태스크 활성/비활성 상태를 설정합니다.
+  - false면 runnable 후보에서 제외됩니다.
+
+- ExecuteAsync(SchedulerContext context, CancellationToken cancellationToken)
+  - 태스크 본문 함수입니다.
+  - cancellationToken 관찰을 빠르게 해줘야 StopAsync가 지연되지 않습니다.
+
+- ScheduledTask(...) 생성자
+  - 람다 기반 태스크를 빠르게 만드는 도우미 생성자입니다.
+  - statusProvider로 UI 상태 문자열을 동적으로 공급할 수 있습니다.
+
+### 17-4. RtosSemaphore
+
+- RtosSemaphore(int initialCount, int maxCount)
+  - 세마포어를 생성합니다.
+  - initialCount는 시작 토큰 수, maxCount는 최대 토큰 수입니다.
+
+- WaitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+  - 토큰 획득을 시도합니다.
+  - timeout 내 획득 시 true, 실패 시 false를 반환합니다.
+
+- Release()
+  - 토큰을 1개 반환합니다.
+
+- Dispose()
+  - 내부 SemaphoreSlim을 해제합니다.
+  - dispose 후 접근은 ObjectDisposedException이 발생합니다.
+
+### 17-5. RtosMutex
+
+- WaitAsync(string owner, Enum_TaskPriority priority, TimeSpan timeout, CancellationToken cancellationToken = default)
+  - owner 이름으로 mutex 획득을 시도합니다.
+  - 대기 중인 태스크 우선순위를 추적하여 EffectiveOwnerPriority 계산에 반영합니다.
+
+- Release(string owner)
+  - 현재 owner만 mutex를 해제할 수 있습니다.
+  - 다른 owner 문자열로 해제하면 SynchronizationLockException이 발생합니다.
+
+- Dispose()
+  - 내부 대기 상태를 정리하고 mutex 리소스를 해제합니다.
+
+### 17-6. RtosEventFlags
+
+- Set(uint flags)
+  - 지정 비트를 set하고 대기 중 waiter를 평가합니다.
+
+- Clear(uint flags)
+  - 지정 비트를 clear합니다.
+
+- WaitAnyAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
+  - 요청 비트 중 하나라도 set되면 완료됩니다.
+  - 반환값은 실제로 매칭된 비트 마스크입니다.
+
+- WaitAllAsync(uint flags, bool autoClear, TimeSpan timeout, CancellationToken cancellationToken = default)
+  - 요청 비트가 모두 set될 때까지 대기합니다.
+
+- Dispose()
+  - 대기 중 waiter를 모두 ObjectDisposedException으로 종료시킵니다.
+
+### 17-7. RtosMessageQueue<T>
+
+- RtosMessageQueue(int capacity)
+  - 고정 용량 큐를 생성합니다.
+
+- SendAsync(T message, TimeSpan timeout, CancellationToken cancellationToken = default)
+  - 큐에 메시지를 넣습니다.
+  - 공간이 없으면 timeout/cancel 정책에 따라 대기합니다.
+
+- ReceiveAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+  - 큐에서 메시지를 꺼냅니다.
+  - 반환 형식은 (Success, Message) 튜플입니다.
+
+- Dispose()
+  - 큐와 내부 세마포어를 정리합니다.
+
+### 17-8. RtosSoftwareTimer
+
+- RtosSoftwareTimer(TimeSpan period, bool isPeriodic, Func<CancellationToken, Task> callback)
+  - 소프트웨어 타이머를 생성합니다.
+  - isPeriodic=true면 주기 반복, false면 one-shot입니다.
+
+- Start()
+  - 타이머 작업을 시작합니다.
+
+- StopAsync()
+  - 타이머 취소 후 실행 중 작업 종료를 기다립니다.
+
+- Dispose()
+  - 동기 리소스 해제 경로입니다.
+
+- DisposeAsync()
+  - 비동기 해제 경로입니다.
+
+- TimerError 이벤트
+  - callback 예외를 외부로 보고합니다.
+  - periodic 모드에서는 예외가 발생해도 다음 주기를 계속 수행합니다.
+
+### 17-9. RtosTickCounter
+
+- RtosTickCounter(TimeSpan tickInterval)
+  - tick 기준 간격을 설정하고 카운터를 생성합니다.
+
+- Reset(DateTimeOffset startedAt)
+  - 기준 시각과 현재 tick 값을 초기화합니다.
+
+- AdvanceTo(DateTimeOffset now)
+  - 현재 시각으로 tick을 계산해 CurrentTick을 갱신합니다.
+
+- GetTimeForTick(long tick)
+  - 특정 tick 번호가 의미하는 실제 시각을 계산합니다.
+
+### 17-10. RtosTraceLog
+
+- RtosTraceLog(int capacity = 512)
+  - 로그 버퍼를 생성합니다.
+  - capacity를 넘으면 가장 오래된 항목부터 제거됩니다.
+
+- Add(string category, string message, string? taskName = null)
+  - 로그 항목을 1개 추가합니다.
+
+- Snapshot()
+  - 현재 로그를 읽기 전용 배열로 복사해 반환합니다.
+
+- Clear()
+  - 로그를 모두 비웁니다.

@@ -355,13 +355,14 @@ namespace Wpf.Lib.RTOS
         {
             var stopwatch = Stopwatch.StartNew();
             var completedAt = now;
+            var executionContext = new SchedulerContext(now, () => ShouldYieldToHigherPriorityTask(task));
 
             MarkTaskStarted(task, now, DateTimeOffset.Now);
             TraceLog.Add("Task", "Task execution started.", GetTaskName(task));
 
             try
             {
-                await task.ExecuteAsync(new SchedulerContext(now), cancellationToken).ConfigureAwait(false);
+                await task.ExecuteAsync(executionContext, cancellationToken).ConfigureAwait(false);
 
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
@@ -387,6 +388,52 @@ namespace Wpf.Lib.RTOS
             finally
             {
                 ScheduleNextRunIfRegistered(task, now, completedAt);
+            }
+        }
+
+        private bool ShouldYieldToHigherPriorityTask(IScheduledTask runningTask)
+        {
+            var runningPriority = TryGetTaskValue(runningTask, task => task.Priority, Enum_TaskPriority.Low);
+            var now = DateTimeOffset.Now;
+
+            lock (_syncRoot)
+            {
+                if (!_runtimeInfos.ContainsKey(runningTask))
+                {
+                    return false;
+                }
+
+                foreach (var candidate in _tasks)
+                {
+                    if (ReferenceEquals(candidate, runningTask))
+                    {
+                        continue;
+                    }
+
+                    if (!_runtimeInfos.ContainsKey(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
+                    {
+                        continue;
+                    }
+
+                    var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
+                    if (candidatePriority <= runningPriority)
+                    {
+                        continue;
+                    }
+
+                    var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
+                    if (candidateNextRunAt <= now)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
         }
 

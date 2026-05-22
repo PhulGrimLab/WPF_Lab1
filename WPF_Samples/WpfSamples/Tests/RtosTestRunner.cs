@@ -32,6 +32,7 @@ internal static class RtosTestRunner
             ("TickCounter rejects overflow tick", TickCounterRejectsOverflowTickAsync),
             ("Scheduler executes periodic task", SchedulerExecutesPeriodicTaskAsync),
             ("Scheduler runs higher priority task first", SchedulerRunsHigherPriorityTaskFirstAsync),
+            ("Scheduler cooperative preemption yields to higher priority", SchedulerCooperativePreemptionYieldsToHigherPriorityAsync),
             ("Scheduler executes one-shot task once", SchedulerExecutesOneShotTaskOnceAsync),
             ("Scheduler stop timeout returns false", SchedulerStopTimeoutReturnsFalseAsync),
             ("Scheduler self stop with infinite timeout returns false", SchedulerSelfStopInfiniteTimeoutReturnsFalseAsync),
@@ -426,6 +427,61 @@ internal static class RtosTestRunner
         RtosAssert.Equal("Critical", executionOrder[0], "Critical task should run first.");
         RtosAssert.Equal("High", executionOrder[1], "High task should run second.");
         RtosAssert.Equal("Low", executionOrder[2], "Low task should run last.");
+    }
+
+    private static async Task SchedulerCooperativePreemptionYieldsToHigherPriorityAsync()
+    {
+        var lowYielded = 0;
+        var highRunCount = 0;
+        var highCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var scheduler = new SchedulerService(
+            tickInterval: TimeSpan.FromMilliseconds(5),
+            snapshotInterval: TimeSpan.FromMilliseconds(20));
+
+        var lowTask = new ScheduledTask(
+            "Low Cooperative",
+            Enum_TaskPriority.Low,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.OneShot,
+            async (context, cancellationToken) =>
+            {
+                for (var i = 0; i < 200; i++)
+                {
+                    if (context.ShouldYield())
+                    {
+                        Interlocked.Exchange(ref lowYielded, 1);
+                        return;
+                    }
+
+                    await Task.Delay(2, cancellationToken).ConfigureAwait(false);
+                }
+            });
+
+        var highTask = new ScheduledTask(
+            "High Urgent",
+            Enum_TaskPriority.Critical,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.OneShot,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref highRunCount);
+                highCompleted.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        highTask.NextRunAt = DateTimeOffset.Now + TimeSpan.FromMilliseconds(30);
+
+        scheduler.Register(lowTask);
+        scheduler.Register(highTask);
+        scheduler.Start();
+
+        var completed = await Task.WhenAny(highCompleted.Task, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        await scheduler.StopAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+        RtosAssert.True(completed == highCompleted.Task, "High priority task should complete without waiting for low task full work.");
+        RtosAssert.True(Volatile.Read(ref lowYielded) == 1, "Low priority task should cooperatively yield when a higher priority task becomes runnable.");
+        RtosAssert.Equal(1, Volatile.Read(ref highRunCount), "High priority task should run exactly once.");
     }
 
     private static async Task SchedulerExecutesOneShotTaskOnceAsync()

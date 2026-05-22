@@ -365,4 +365,12 @@ primitive를 외우려고 하기보다, 문제를 먼저 분류하면 선택이 
 4. `SchedulerService.cs`에서 실제 실행 루프와 primitive 사용 맥락 연결
 5. `RtosTestRunner.cs`에서 검증 시나리오를 보며 동작 재확인
 
+---
+
+## 9. 성숙도 평가 문서
+
+현재 구현이 RTOS 시뮬레이터로서 어느 수준인지 판단하려면 아래 문서를 함께 보세요.
+
+- Docs/RTOS_Simulator_Maturity_Checklist.md
+
 이 다섯 가지를 조합하면 대부분의 RTOS 스타일 동기화 시나리오를 표현할 수 있습니다.

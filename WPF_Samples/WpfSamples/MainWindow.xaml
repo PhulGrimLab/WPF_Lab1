@@ -160,6 +160,270 @@
                 </Grid>
             </TabItem>
 
+            <TabItem Header="선점 데모">
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Background="White"
+                            BorderBrush="#D7DCE2"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14"
+                            Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                                <Button Content="데모 시작"
+                                    Command="{Binding StartPreemptionTestCommand}"
+                                    ToolTip="협력형 선점 테스트를 시작합니다."/>
+                            <Button Grid.Column="1"
+                                    Content="데모 중지"
+                                    Command="{Binding StopPreemptionTestCommand}"
+                                    ToolTip="협력형 선점 테스트를 중지합니다."/>
+
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="상태:"
+                                           FontWeight="SemiBold"
+                                           Foreground="#374151"/>
+                                <TextBlock Text="{Binding PreemptionTestState}"
+                                           Margin="6,0,0,0"
+                                           Foreground="#111827"/>
+                            </StackPanel>
+
+                            <Border Grid.Column="3"
+                                    Background="{Binding PreemptionHealthBadgeBackground}"
+                                    CornerRadius="999"
+                                    Padding="10,4"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    ToolTip="자동 상태 판정: 정상/관찰/주의/중지">
+                                <TextBlock Text="{Binding PreemptionHealthLabel}"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding PreemptionHealthBadgeForeground}"/>
+                            </Border>
+
+                            <TextBlock Grid.Column="4"
+                                       Text="Low 우선순위 태스크가 실행 중일 때 High 태스크가 runnable 되면 context.ShouldYield()로 양보하는 과정을 실시간으로 확인할 수 있습니다."
+                                       Foreground="#4B5563"
+                                       TextWrapping="Wrap"
+                                       Margin="12,0,0,0"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1"
+                            Background="#EEF6FF"
+                            BorderBrush="#BFDBFE"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="How To Read This Demo"
+                                       FontWeight="SemiBold"
+                                       Foreground="#1E3A8A"
+                                       Margin="0,0,0,6"/>
+                            <TextBlock Text="{Binding PreemptionHealthDescription}"
+                                       Foreground="#1E3A8A"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"
+                                       ToolTip="상태 배지가 왜 이렇게 표시되는지 설명합니다."/>
+                            <TextBlock Foreground="#1F2937"
+                                       TextWrapping="Wrap">
+                                <Run Text="1) 데모 시작을 누르면 낮은 우선순위 태스크가 길게 작업하고, 높은 우선순위 태스크가 주기적으로 실행 대기 상태가 됩니다."/>
+                                <LineBreak/>
+                                <Run Text="2) 선점이 잘 동작하면 양보 횟수(Yield Count)가 증가하고, 로그에 'Low task yielded...' 메시지가 반복됩니다."/>
+                                <LineBreak/>
+                                <Run Text="3) 동시에 높은 우선순위 실행 횟수(High Run Count)도 꾸준히 증가해야 합니다(우선 실행 확인)."/>
+                                <LineBreak/>
+                                <Run Text="4) 아래 양보 추이(Yield Trend) 막대가 최근 10초 동안 양보가 얼마나 발생했는지 보여줍니다."/>
+                                <LineBreak/>
+                                <Run Text="정상 패턴: 양보 횟수 ↑ + 높은 우선순위 실행 횟수 ↑ + 로그 연속 발생"/>
+                                <LineBreak/>
+                                <Run Text="점검 필요 패턴: 양보 횟수가 0 근처인데 낮은 우선순위 작업량만 급격히 증가"/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="2"
+                          Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="2*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Background="White"
+                                BorderBrush="#D7DCE2"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12"
+                                Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="낮은 우선순위 작업량"
+                                           FontWeight="SemiBold"
+                                           Foreground="#374151"
+                                           ToolTip="낮은 우선순위 태스크가 수행한 총 작업 단위입니다."/>
+                                <TextBlock Text="{Binding PreemptionLowWorkUnits}"
+                                           Margin="0,6,0,0"
+                                           FontSize="22"
+                                           FontWeight="SemiBold"
+                                           Foreground="#111827"
+                                           ToolTip="값이 빠르게 증가하는데 양보 횟수가 늘지 않으면 선점이 충분히 일어나지 않는 신호입니다."/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1"
+                                Background="White"
+                                BorderBrush="#D7DCE2"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12"
+                                Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="높은 우선순위 실행 횟수"
+                                           FontWeight="SemiBold"
+                                           Foreground="#374151"
+                                           ToolTip="높은 우선순위 태스크가 실제로 실행된 횟수입니다."/>
+                                <TextBlock Text="{Binding PreemptionHighRunCount}"
+                                           Margin="0,6,0,0"
+                                           FontSize="22"
+                                           FontWeight="SemiBold"
+                                           Foreground="#111827"
+                                           ToolTip="이 값이 꾸준히 증가하면 높은 우선순위 태스크가 제때 실행되고 있다는 의미입니다."/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Background="White"
+                                BorderBrush="#D7DCE2"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12"
+                                Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="양보 횟수"
+                                           FontWeight="SemiBold"
+                                           Foreground="#374151"
+                                           ToolTip="낮은 우선순위 태스크가 context.ShouldYield()로 양보한 횟수입니다."/>
+                                <TextBlock Text="{Binding PreemptionYieldCount}"
+                                           Margin="0,6,0,0"
+                                           FontSize="22"
+                                           FontWeight="SemiBold"
+                                           Foreground="#111827"
+                                           ToolTip="값이 증가할수록 협력형 선점이 정상적으로 발생하고 있음을 의미합니다."/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="3"
+                                Background="White"
+                                BorderBrush="#D7DCE2"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12">
+                            <StackPanel>
+                                <TextBlock Text="최근 이벤트"
+                                           FontWeight="SemiBold"
+                                           Foreground="#374151"
+                                           ToolTip="가장 최근에 발생한 핵심 이벤트를 표시합니다."/>
+                                <TextBlock Text="{Binding LastPreemptionEvent}"
+                                           Margin="0,6,0,0"
+                                           TextWrapping="Wrap"
+                                           Foreground="#111827"
+                                           ToolTip="최근 이벤트 메시지 상세 내용입니다."/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                        <Border Grid.Row="3"
+                            Background="White"
+                            BorderBrush="#D7DCE2"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            Margin="0,0,0,12">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="양보 추이 (최근 10초)"
+                                       FontWeight="SemiBold"
+                                       Foreground="#374151"
+                                       Margin="0,0,0,8"
+                                       ToolTip="각 막대는 해당 초(1초 단위)에서 발생한 양보 횟수를 의미합니다."/>
+                            <ItemsControl ItemsSource="{Binding PreemptionYieldTrend}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Rows="1"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#E5E7EB"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="6"
+                                                Margin="0,0,6,0"
+                                                Background="#F9FAFB">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding SecondLabel}"
+                                                           FontSize="11"
+                                                           Foreground="#6B7280"
+                                                           HorizontalAlignment="Center"/>
+                                                <ProgressBar Minimum="0"
+                                                             Maximum="{Binding DataContext.PreemptionTrendMaxYield, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                             Value="{Binding YieldCount, Mode=OneWay}"
+                                                             Height="12"
+                                                             Margin="0,6,0,4"/>
+                                                <TextBlock Text="{Binding YieldCount, StringFormat=Yields: {0}}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#111827"
+                                                           HorizontalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DockPanel>
+                    </Border>
+
+                        <Border Grid.Row="4"
+                            Background="White"
+                            BorderBrush="#D7DCE2"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="실시간 선점 로그"
+                                       FontWeight="SemiBold"
+                                       Foreground="#374151"
+                                       Margin="0,0,0,8"
+                                       ToolTip="선점 관련 이벤트를 시간순으로 보여줍니다."/>
+                            <ListBox ItemsSource="{Binding PreemptionLogs}"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     FontFamily="Consolas"
+                                     FontSize="12"/>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
             <TabItem Header="RTOS Tests">
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
