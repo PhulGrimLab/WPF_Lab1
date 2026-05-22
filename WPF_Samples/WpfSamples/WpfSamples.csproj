@@ -13,6 +13,9 @@
     <ProjectReference Include="..\Wpf.Lib.Common\Wpf.Lib.Common.csproj">
       <Private>True</Private>
     </ProjectReference>
+    <ProjectReference Include="..\Wpf.Lib.RTOS\Wpf.Lib.RTOS.csproj">
+      <Private>True</Private>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>
