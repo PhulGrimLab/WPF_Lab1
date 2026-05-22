@@ -8,6 +8,7 @@ internal sealed class CounterTask : IScheduledTask
     public Enum_TaskPriority Priority => Enum_TaskPriority.Normal;
     public TimeSpan Period => TimeSpan.FromMilliseconds(100);
     public Enum_TaskExecutionMode Mode => Enum_TaskExecutionMode.Periodic;
+    public Enum_TaskOverrunPolicy OverrunPolicy => Enum_TaskOverrunPolicy.FixedRate;
     public DateTimeOffset NextRunAt { get; set; } = DateTimeOffset.Now;
     public bool IsEnabled { get; private set; } = true;
     public string Status => $"Count = {Count:N0}";

@@ -17,8 +17,9 @@ namespace Wpf.Lib.RTOS
             TimeSpan period,
             Enum_TaskExecutionMode mode,
             Func<SchedulerContext, CancellationToken, Task> executeAsync,
-            Func<string>? statusProvider = null)
-            : base(name, priority, period, mode)
+            Func<string>? statusProvider = null,
+            Enum_TaskOverrunPolicy overrunPolicy = Enum_TaskOverrunPolicy.FixedRate)
+            : base(name, priority, period, mode, overrunPolicy)
         {
             _executeAsync = executeAsync ?? throw new ArgumentNullException(nameof(executeAsync));
             _statusProvider = statusProvider;

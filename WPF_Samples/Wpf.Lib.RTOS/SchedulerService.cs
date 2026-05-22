@@ -21,10 +21,21 @@ namespace Wpf.Lib.RTOS
         {
             _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(10);
             _snapshotInterval = snapshotInterval ?? TimeSpan.FromMilliseconds(100);
+
+            if (_tickInterval <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(tickInterval), "Tick interval must be greater than zero.");
+            }
+
+            if (_snapshotInterval <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(snapshotInterval), "Snapshot interval must be greater than zero.");
+            }
         }
 
         public event EventHandler<SchedulerSnapshot>? SnapshotChanged;
         public event EventHandler<Exception>? SchedulerError;
+        public RtosTraceLog TraceLog { get; } = new();
 
         public bool IsRunning
         {
@@ -54,6 +65,7 @@ namespace Wpf.Lib.RTOS
                 _runtimeInfos[task] = new TaskRuntimeInfo();
             }
 
+            TraceLog.Add("Scheduler", "Task registered.", GetTaskName(task));
             PublishSnapshot(force: true);
         }
 
@@ -73,6 +85,7 @@ namespace Wpf.Lib.RTOS
 
             if (removed)
             {
+                TraceLog.Add("Scheduler", "Task unregistered.", GetTaskName(task));
                 PublishSnapshot(force: true);
             }
 
@@ -89,6 +102,7 @@ namespace Wpf.Lib.RTOS
                 _runtimeInfos.Clear();
             }
 
+            TraceLog.Add("Scheduler", "All tasks cleared.");
             PublishSnapshot(force: true);
         }
 
@@ -111,6 +125,7 @@ namespace Wpf.Lib.RTOS
                 _runTask = Task.Run(() => RunAsync(cts));
             }
 
+            TraceLog.Add("Scheduler", "Scheduler started.");
             PublishSnapshot(force: true);
         }
 
@@ -121,6 +136,8 @@ namespace Wpf.Lib.RTOS
 
         public async Task<bool> StopAsync(TimeSpan timeout)
         {
+            ValidateTimeout(timeout);
+
             CancellationTokenSource? cts;
             Task? runTask;
 
@@ -137,6 +154,7 @@ namespace Wpf.Lib.RTOS
             }
 
             cts?.Cancel();
+            TraceLog.Add("Scheduler", "Stop requested.");
 
             if (cts is null || runTask is null)
             {
@@ -170,6 +188,7 @@ namespace Wpf.Lib.RTOS
         public void Dispose()
         {
             CancellationTokenSource? cts;
+            Task? runTask;
 
             lock (_stateSyncRoot)
             {
@@ -180,12 +199,16 @@ namespace Wpf.Lib.RTOS
 
                 _state = SchedulerRunState.Disposed;
                 cts = _cts;
-                _cts = null;
-                _runTask = null;
+                runTask = _runTask;
             }
 
             cts?.Cancel();
-            cts?.Dispose();
+            TraceLog.Add("Scheduler", "Scheduler disposed.");
+            if (cts is not null && (runTask is null || runTask.IsCompleted))
+            {
+                CleanupStoppedScheduler(cts);
+            }
+
             SnapshotChanged = null;
             SchedulerError = null;
         }
@@ -258,7 +281,8 @@ namespace Wpf.Lib.RTOS
 
             foreach (var task in _runnableBuffer)
             {
-                if (task.IsEnabled && task.NextRunAt <= now)
+                if (TryGetTaskValue(task, candidate => candidate.IsEnabled, false)
+                    && TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue) <= now)
                 {
                     destination.Add(task);
                 }
@@ -277,24 +301,31 @@ namespace Wpf.Lib.RTOS
 
         private static int CompareRunnableTasks(IScheduledTask x, IScheduledTask y)
         {
-            var priorityComparison = y.Priority.CompareTo(x.Priority);
+            var xPriority = TryGetTaskValue(x, task => task.Priority, Enum_TaskPriority.Low);
+            var yPriority = TryGetTaskValue(y, task => task.Priority, Enum_TaskPriority.Low);
+            var priorityComparison = yPriority.CompareTo(xPriority);
             return priorityComparison != 0
                 ? priorityComparison
-                : x.NextRunAt.CompareTo(y.NextRunAt);
+                : TryGetTaskValue(x, task => task.NextRunAt, DateTimeOffset.MaxValue)
+                    .CompareTo(TryGetTaskValue(y, task => task.NextRunAt, DateTimeOffset.MaxValue));
         }
 
         private async Task ExecuteTaskAsync(IScheduledTask task, DateTimeOffset now, CancellationToken cancellationToken)
         {
             var stopwatch = Stopwatch.StartNew();
+            var completedAt = now;
 
-            MarkTaskStarted(task, now);
+            MarkTaskStarted(task, now, DateTimeOffset.Now);
+            TraceLog.Add("Task", "Task execution started.", GetTaskName(task));
 
             try
             {
                 await task.ExecuteAsync(new SchedulerContext(now), cancellationToken).ConfigureAwait(false);
 
                 stopwatch.Stop();
-                MarkTaskCompleted(task, DateTimeOffset.Now, stopwatch.Elapsed);
+                completedAt = DateTimeOffset.Now;
+                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), GetScheduledState(task, completedAt));
+                TraceLog.Add("Task", $"Task execution completed in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -303,49 +334,51 @@ namespace Wpf.Lib.RTOS
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                MarkTaskFailed(task, DateTimeOffset.Now, stopwatch.Elapsed, ex.Message);
+                completedAt = DateTimeOffset.Now;
+                MarkTaskFailed(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), ex.Message, GetScheduledState(task, completedAt));
+                TraceLog.Add("Task", $"Task execution failed: {ex.Message}", GetTaskName(task));
                 RaiseSchedulerError(ex);
             }
             finally
             {
-                ScheduleNextRunIfRegistered(task, now);
+                ScheduleNextRunIfRegistered(task, now, completedAt);
             }
         }
 
-        private void MarkTaskStarted(IScheduledTask task, DateTimeOffset now)
+        private void MarkTaskStarted(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset startedAt)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkStarted(now);
+                    runtimeInfo.MarkStarted(scheduledAt, startedAt);
                 }
             }
         }
 
-        private void MarkTaskCompleted(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration)
+        private void MarkTaskCompleted(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, Enum_TaskState nextState)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkCompleted(completedAt, duration);
+                    runtimeInfo.MarkCompleted(completedAt, duration, period, nextState);
                 }
             }
         }
 
-        private void MarkTaskFailed(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, string error)
+        private void MarkTaskFailed(IScheduledTask task, DateTimeOffset completedAt, TimeSpan duration, TimeSpan period, string error, Enum_TaskState nextState)
         {
             lock (_syncRoot)
             {
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
-                    runtimeInfo.MarkFailed(completedAt, duration, error);
+                    runtimeInfo.MarkFailed(completedAt, duration, period, error, nextState);
                 }
             }
         }
 
-        private void ScheduleNextRunIfRegistered(IScheduledTask task, DateTimeOffset now)
+        private void ScheduleNextRunIfRegistered(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset completedAt)
         {
             lock (_syncRoot)
             {
@@ -354,9 +387,11 @@ namespace Wpf.Lib.RTOS
                     return;
                 }
 
-                task.NextRunAt = task.Mode == Enum_TaskExecutionMode.Periodic
-                    ? now + task.Period
-                    : DateTimeOffset.MaxValue;
+                var mode = TryGetTaskValue(task, candidate => candidate.Mode, Enum_TaskExecutionMode.OneShot);
+                var period = TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero);
+                var overrunPolicy = TryGetTaskValue(task, candidate => candidate.OverrunPolicy, Enum_TaskOverrunPolicy.FixedRate);
+
+                task.NextRunAt = GetNextRunAt(mode, overrunPolicy, period, scheduledAt, completedAt);
             }
         }
 
@@ -415,19 +450,136 @@ namespace Wpf.Lib.RTOS
 
         private static ScheduledTaskSnapshot CreateTaskSnapshot(IScheduledTask task, TaskRuntimeSnapshot runtimeInfo)
         {
+            var name = GetTaskName(task);
+            var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
+            var nextRunAt = TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue);
+
             return new ScheduledTaskSnapshot(
-                task.Name,
-                task.Priority,
-                task.Period,
-                task.Mode,
-                task.NextRunAt,
-                task.IsEnabled,
-                task.Status,
+                name,
+                TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low),
+                TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero),
+                TryGetTaskValue(task, candidate => candidate.Mode, Enum_TaskExecutionMode.OneShot),
+                GetSnapshotState(isEnabled, nextRunAt, runtimeInfo),
+                nextRunAt,
+                isEnabled,
+                GetTaskStatus(task),
                 runtimeInfo.RunCount,
                 runtimeInfo.LastStartedAt,
                 runtimeInfo.LastCompletedAt,
                 runtimeInfo.LastDuration,
+                runtimeInfo.MinDuration,
+                runtimeInfo.MaxDuration,
+                runtimeInfo.AverageDuration,
+                runtimeInfo.LastStartDelay,
+                runtimeInfo.MaxStartDelay,
+                runtimeInfo.DeadlineMissCount,
                 runtimeInfo.LastError);
+        }
+
+        private static Enum_TaskState GetScheduledState(IScheduledTask task, DateTimeOffset now)
+        {
+            if (!TryGetTaskValue(task, candidate => candidate.IsEnabled, false))
+            {
+                return Enum_TaskState.Suspended;
+            }
+
+            return TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue) <= now
+                ? Enum_TaskState.Ready
+                : Enum_TaskState.Blocked;
+        }
+
+        private static DateTimeOffset GetNextRunAt(
+            Enum_TaskExecutionMode mode,
+            Enum_TaskOverrunPolicy overrunPolicy,
+            TimeSpan period,
+            DateTimeOffset scheduledAt,
+            DateTimeOffset completedAt)
+        {
+            if (mode != Enum_TaskExecutionMode.Periodic || period <= TimeSpan.Zero)
+            {
+                return DateTimeOffset.MaxValue;
+            }
+
+            try
+            {
+                return overrunPolicy switch
+                {
+                    Enum_TaskOverrunPolicy.FixedDelay => completedAt + period,
+                    Enum_TaskOverrunPolicy.SkipMissedTicks => GetNextRunAfterMissedTicks(scheduledAt, completedAt, period),
+                    _ => scheduledAt + period,
+                };
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return DateTimeOffset.MaxValue;
+            }
+            catch (OverflowException)
+            {
+                return DateTimeOffset.MaxValue;
+            }
+        }
+
+        private static DateTimeOffset GetNextRunAfterMissedTicks(DateTimeOffset scheduledAt, DateTimeOffset completedAt, TimeSpan period)
+        {
+            var elapsedTicks = (completedAt - scheduledAt).Ticks;
+            if (elapsedTicks < period.Ticks)
+            {
+                return scheduledAt + period;
+            }
+
+            var missedPeriods = elapsedTicks / period.Ticks + 1;
+            return scheduledAt + TimeSpan.FromTicks(checked(period.Ticks * missedPeriods));
+        }
+
+        private static Enum_TaskState GetSnapshotState(bool isEnabled, DateTimeOffset nextRunAt, TaskRuntimeSnapshot runtimeInfo)
+        {
+            if (!isEnabled)
+            {
+                return Enum_TaskState.Suspended;
+            }
+
+            if (runtimeInfo.State == Enum_TaskState.Running)
+            {
+                return Enum_TaskState.Running;
+            }
+
+            return nextRunAt <= DateTimeOffset.Now
+                ? Enum_TaskState.Ready
+                : Enum_TaskState.Blocked;
+        }
+
+        private static string GetTaskName(IScheduledTask task)
+        {
+            return TryGetTaskValue(task, candidate => candidate.Name, task.GetType().Name);
+        }
+
+        private static string GetTaskStatus(IScheduledTask task)
+        {
+            try
+            {
+                return task.Status;
+            }
+            catch (Exception ex)
+            {
+                return $"Status error: {ex.Message}";
+            }
+        }
+
+        private static TimeSpan GetTaskPeriod(IScheduledTask task)
+        {
+            return TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero);
+        }
+
+        private static TValue TryGetTaskValue<TValue>(IScheduledTask task, Func<IScheduledTask, TValue> valueFactory, TValue fallback)
+        {
+            try
+            {
+                return valueFactory(task);
+            }
+            catch
+            {
+                return fallback;
+            }
         }
 
         private static async Task<bool> WaitForStopAsync(Task runTask, TimeSpan timeout)
@@ -436,11 +588,6 @@ namespace Wpf.Lib.RTOS
             {
                 await Task.WhenAny(runTask).ConfigureAwait(false);
                 return true;
-            }
-
-            if (timeout < TimeSpan.Zero)
-            {
-                throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative or Timeout.InfiniteTimeSpan.");
             }
 
             using var delayCts = new CancellationTokenSource();
@@ -453,6 +600,14 @@ namespace Wpf.Lib.RTOS
             }
 
             return completedTask == runTask;
+        }
+
+        private static void ValidateTimeout(TimeSpan timeout)
+        {
+            if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
+            {
+                throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative or Timeout.InfiniteTimeSpan.");
+            }
         }
 
         private void AttachCleanupContinuation(Task runTask, CancellationTokenSource cts)

@@ -8,6 +8,7 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
     private string _priority = string.Empty;
     private string _period = string.Empty;
     private string _mode = string.Empty;
+    private string _state = string.Empty;
     private bool _isEnabled;
     private string _status = string.Empty;
     private long _runCount;
@@ -43,6 +44,12 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
     {
         get => _mode;
         private set => SetProperty(ref _mode, value, nameof(Mode));
+    }
+
+    public string State
+    {
+        get => _state;
+        private set => SetProperty(ref _state, value, nameof(State));
     }
 
     public bool IsEnabled
@@ -98,6 +105,7 @@ internal sealed class ScheduledTaskStatusViewModel : INotifyPropertyChanged
         Priority = snapshot.Priority.ToString();
         Period = $"{snapshot.Period.TotalMilliseconds:N0} ms";
         Mode = snapshot.Mode.ToString();
+        State = snapshot.State.ToString();
         IsEnabled = snapshot.IsEnabled;
         Status = snapshot.Status;
         RunCount = snapshot.RunCount;

@@ -10,7 +10,8 @@ namespace Wpf.Lib.RTOS
             string name,
             Enum_TaskPriority priority,
             TimeSpan period,
-            Enum_TaskExecutionMode mode)
+            Enum_TaskExecutionMode mode,
+            Enum_TaskOverrunPolicy overrunPolicy = Enum_TaskOverrunPolicy.FixedRate)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -26,6 +27,7 @@ namespace Wpf.Lib.RTOS
             Priority = priority;
             Period = period;
             Mode = mode;
+            OverrunPolicy = overrunPolicy;
             _nextRunAt = DateTimeOffset.Now;
         }
 
@@ -33,6 +35,7 @@ namespace Wpf.Lib.RTOS
         public Enum_TaskPriority Priority { get; }
         public TimeSpan Period { get; }
         public Enum_TaskExecutionMode Mode { get; }
+        public Enum_TaskOverrunPolicy OverrunPolicy { get; }
 
         public DateTimeOffset NextRunAt
         {

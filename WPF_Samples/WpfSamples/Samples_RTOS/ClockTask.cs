@@ -8,6 +8,7 @@ internal sealed class ClockTask : IScheduledTask
     public Enum_TaskPriority Priority => Enum_TaskPriority.Low;
     public TimeSpan Period => TimeSpan.FromSeconds(1);
     public Enum_TaskExecutionMode Mode => Enum_TaskExecutionMode.Periodic;
+    public Enum_TaskOverrunPolicy OverrunPolicy => Enum_TaskOverrunPolicy.FixedRate;
     public DateTimeOffset NextRunAt { get; set; } = DateTimeOffset.Now;
     public bool IsEnabled { get; private set; } = true;
     public string Status => CurrentTimeText;

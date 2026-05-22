@@ -12,6 +12,7 @@ namespace Wpf.Lib.RTOS
         Enum_TaskPriority Priority { get; }
         TimeSpan Period { get; }
         Enum_TaskExecutionMode Mode { get; }
+        Enum_TaskOverrunPolicy OverrunPolicy { get; }
 
         DateTimeOffset NextRunAt { get; set; }
         bool IsEnabled { get; }

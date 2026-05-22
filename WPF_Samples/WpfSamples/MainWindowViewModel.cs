@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Threading;
 using Wpf.Lib.RTOS;
+using WpfSamples.Tests;
 using WpfSamples.Samples_RTOS;
 
 namespace WpfSamples;
@@ -15,8 +16,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _taskViewModels = [];
     private SchedulerSnapshot? _latestSnapshot;
     private bool _isSnapshotApplyQueued;
+    private bool _isRunningTests;
     private string _schedulerState = "Stopped";
     private string _lastSnapshotAt = "-";
+    private string _testSummary = "Not run";
 
     public MainWindowViewModel()
     {
@@ -26,6 +29,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         StopCommand = new RelayCommand(
             () => _ = StopSchedulerAsync(),
             () => _scheduler.IsRunning);
+        RunTestsCommand = new RelayCommand(
+            () => _ = RunTestsAsync(),
+            () => !_isRunningTests);
 
         _scheduler.SnapshotChanged += OnSchedulerSnapshotChanged;
         RegisterSampleTasks();
@@ -34,9 +40,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<ScheduledTaskStatusViewModel> Tasks { get; } = [];
+    public ObservableCollection<RtosTestResult> TestResults { get; } = [];
 
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
+    public RelayCommand RunTestsCommand { get; }
 
     public string SchedulerState
     {
@@ -68,6 +76,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public string TestSummary
+    {
+        get => _testSummary;
+        private set
+        {
+            if (_testSummary == value)
+            {
+                return;
+            }
+
+            _testSummary = value;
+            OnPropertyChanged(nameof(TestSummary));
+        }
+    }
+
     public void Dispose()
     {
         _scheduler.SnapshotChanged -= OnSchedulerSnapshotChanged;
@@ -92,6 +115,32 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         await _scheduler.StopAsync().ConfigureAwait(false);
 
         await _dispatcher.InvokeAsync(RefreshCommandStates);
+    }
+
+    private async Task RunTestsAsync()
+    {
+        _isRunningTests = true;
+        await _dispatcher.InvokeAsync(() =>
+        {
+            TestSummary = "Running...";
+            TestResults.Clear();
+            RefreshCommandStates();
+        });
+
+        var results = await RtosTestRunner.RunAllAsync().ConfigureAwait(false);
+
+        await _dispatcher.InvokeAsync(() =>
+        {
+            foreach (var result in results)
+            {
+                TestResults.Add(result);
+            }
+
+            var passedCount = results.Count(result => result.Passed);
+            TestSummary = $"{passedCount}/{results.Count} passed";
+            _isRunningTests = false;
+            RefreshCommandStates();
+        });
     }
 
     private void OnSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
@@ -150,6 +199,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     {
         StartCommand.RaiseCanExecuteChanged();
         StopCommand.RaiseCanExecuteChanged();
+        RunTestsCommand.RaiseCanExecuteChanged();
     }
 
     private void OnPropertyChanged(string propertyName)

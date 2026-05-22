@@ -20,6 +20,21 @@ namespace Wpf.Lib.RTOS
         OneShot
     }
 
+    public enum Enum_TaskState
+    {
+        Ready,
+        Running,
+        Blocked,
+        Suspended
+    }
+
+    public enum Enum_TaskOverrunPolicy
+    {
+        FixedRate,
+        FixedDelay,
+        SkipMissedTicks
+    }
+
     internal class CommonRTOS
     {
     }
