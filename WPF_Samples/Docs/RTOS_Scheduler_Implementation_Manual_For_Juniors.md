@@ -325,6 +325,97 @@ while (workRemaining)
 4. last error
 5. start/done thread id
 
+### 10-0. 상태(State) 정의를 코드로 고정하기
+
+재구현 시 가장 먼저 맞춰야 하는 부분 중 하나가 상태 의미입니다.
+
+권장 정의(현재 프로젝트와 동일):
+
+1. `Running`
+- 현재 실행 중인 태스크
+
+2. `Ready`
+- 실행 가능 상태
+- `IsEnabled == true` && `NextRunAt <= now`
+
+3. `Blocked`
+- 실행 대기 상태(주기 도래 전)
+- `IsEnabled == true` && `NextRunAt > now`
+
+4. `Suspended`
+- 실행 비활성 상태
+- `IsEnabled == false` 또는 OneShot 완료
+
+중요:
+
+1. 이 상태는 OS 스레드 상태와 다릅니다.
+2. 스케줄러 정책을 설명하기 위한 도메인 상태입니다.
+
+### 10-0-1. 상태 전이 표
+
+| 현재 | 조건 | 다음 |
+| --- | --- | --- |
+| Ready | 스케줄러가 선택해 실행 시작 | Running |
+| Running | Periodic 완료 + nextRunAt > now | Blocked |
+| Running | Periodic 완료 + nextRunAt <= now | Ready |
+| Running | OneShot 완료 | Suspended |
+| Blocked | 시간이 흘러 nextRunAt <= now | Ready |
+| Ready/Blocked | SetEnabled(false) | Suspended |
+| Suspended | SetEnabled(true) + nextRunAt > now | Blocked |
+| Suspended | SetEnabled(true) + nextRunAt <= now | Ready |
+
+실무 체크 포인트:
+
+1. 상태 계산 로직은 스냅샷 생성 시점에 단일 함수로 모아두세요.
+2. UI에서 상태를 보고 디버깅할 때는 RunCount/LastStartedAt과 함께 해석하세요.
+3. 선점 데모처럼 주기가 짧은 구성에서는 Ready/Blocked 전환이 빠르게 반복되어 정상입니다.
+
+### 10-1. 기아(starvation) 경고를 운영 신호로 추가하기
+
+선점 데모/운영 모니터에서 아래 조합을 함께 보면 기아 탐지가 실용적입니다.
+
+1. LOW RunCount 증가 여부
+2. LOW LastStartedAt 최신성
+3. HIGH/NORMAL RunCount 증가 여부
+4. 상위 우선순위 task의 Ready/Running 지속 여부
+
+판정 예시:
+
+1. LOW RunCount가 일정 시간 증가하지 않음
+2. LOW LastStartedAt도 같은 시간 동안 갱신되지 않음
+3. 같은 기간 HIGH/NORMAL은 계속 진행됨
+
+위 조건이 동시에 성립하면 "LOW가 준비되더라도 실행 기회를 얻지 못하는 구간"으로 볼 수 있습니다.
+
+실무 팁:
+
+1. 경고 임계값은 고정하지 말고 조절 가능하게 두세요.
+2. 이 프로젝트는 선점 데모 UI에 "기아 감지 민감도" 슬라이더를 추가해 판정 지연(초)을 런타임에 조정할 수 있게 했습니다.
+3. 기본 3초를 시작점으로, 환경에 따라 1~8초 범위에서 튜닝합니다.
+
+---
+
+## 10-2. UI 끊김 방지 원칙 (데모/운영 공통)
+
+선점/모니터링 화면이 무거워지지 않게 하려면 아래를 지키는 것이 중요합니다.
+
+1. 로그는 건별 출력 대신 누적 요약 출력
+2. 컬렉션은 값이 바뀐 경우에만 재구성
+3. 타이머 tick에서 처리할 최대 작업량을 제한
+
+현재 프로젝트의 적용 예:
+
+1. QueuePreemptionLogEvery로 이벤트를 N회 누적 후 1회 출력
+2. ActiveTasks 집합이 동일하면 RebuildActiveTasks 생략
+3. pending 로그 큐 상한/틱당 배출 제한으로 UI 프레임 드랍 완화
+4. 선점 데모 하단 로그는 1초 간격으로 누적 요약 1건만 ListBox에 반영
+
+추가 설명:
+
+1. UI 끊김이 남으면 먼저 로그 append 빈도를 확인하세요.
+2. ListBox/ObservableCollection에 대한 고빈도 Insert는 체감 끊김으로 바로 나타납니다.
+3. 따라서 "생성 빈도 제한 + 1초 배치 요약" 조합이 가장 비용 대비 효과가 큽니다.
+
 ---
 
 ## 11. 8단계: 테스트를 구현 단계와 같이 성장시키기

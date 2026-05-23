@@ -168,6 +168,52 @@ SchedulerService는 태스크마다 TaskRuntimeInfo를 유지합니다.
 
 즉 UI는 내부 mutable 객체를 직접 만지지 않고 snapshot만 읽습니다.
 
+### 5-1. 상태(State) 해석 가이드
+
+이 프로젝트에서 `Ready/Blocked/Running/Suspended`는
+운영체제 스레드 상태가 아니라 **스케줄러 관점 상태**입니다.
+
+1. `Running`
+- 의미: 현재 실행 중인 태스크
+- 조건: 런타임 상태가 Running으로 기록된 경우
+
+2. `Ready`
+- 의미: 즉시 실행 가능한 상태
+- 조건: `IsEnabled == true` 이고 `NextRunAt <= now`
+
+3. `Blocked`
+- 의미: 비활성은 아니지만 다음 실행 시각을 기다리는 상태
+- 조건: `IsEnabled == true` 이고 `NextRunAt > now`
+
+4. `Suspended`
+- 의미: 실행 비활성 상태
+- 조건: `IsEnabled == false` 또는 OneShot 완료 후 자동 비활성화
+
+### 5-2. 상태 전이 표 (요약)
+
+| 현재 | 조건 | 다음 |
+| --- | --- | --- |
+| Ready | 스케줄러가 선택하여 실행 시작 | Running |
+| Running | 실행 완료 + Periodic + 다음 시각이 미래 | Blocked |
+| Running | 실행 완료 + Periodic + 다음 시각이 현재/과거 | Ready |
+| Running | 실행 완료 + OneShot | Suspended |
+| Blocked | 시간이 흘러 `NextRunAt <= now` | Ready |
+| Ready/Blocked | `SetEnabled(false)` | Suspended |
+| Suspended | `SetEnabled(true)` + 다음 시각 도래 전 | Blocked |
+| Suspended | `SetEnabled(true)` + 다음 시각 도래 | Ready |
+
+### 5-3. 모니터 탭과 선점 데모에서 상태가 다르게 보이는 이유
+
+1. RTOS Monitor 샘플 태스크
+- 주기가 상대적으로 길어(100ms/250ms/1s) 대기 시간이 많음
+- 따라서 스냅샷 시점에 `Blocked`가 자주 보임
+
+2. 선점 데모 태스크
+- 주기가 짧고 선점 시 즉시 재예약 경로가 자주 발생
+- 그래서 `Ready <-> Blocked`가 빠르게 교차하며 보임
+
+둘 다 현재 구현 기준으로 정상 동작일 수 있습니다.
+
 ---
 
 ## 6. 동기화 primitive 쉽게 이해하기

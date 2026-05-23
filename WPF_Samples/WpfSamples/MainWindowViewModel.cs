@@ -14,6 +14,7 @@ namespace WpfSamples;
 
 internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable, IAsyncDisposable
 {
+    private const int MaxPendingPreemptionLogs = 300;
     private static readonly Brush HealthStoppedBackground = new SolidColorBrush(Color.FromRgb(229, 231, 235));
     private static readonly Brush HealthStoppedForeground = new SolidColorBrush(Color.FromRgb(55, 65, 81));
     private static readonly Brush HealthGoodBackground = new SolidColorBrush(Color.FromRgb(220, 252, 231));
@@ -38,6 +39,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _preemptionUiTimer;
     private readonly ConcurrentQueue<string> _pendingPreemptionLogs = new();
+    private readonly ConcurrentDictionary<string, int> _preemptionLogOccurrenceCounts = new();
+    private int _pendingPreemptionLogCount;
+    private int _suppressedPreemptionLogCount;
+    private DateTimeOffset _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
     private readonly ConcurrentDictionary<string, LowWorkerRuntimeStats> _lowWorkerRuntimeStats = new();
     private readonly object _snapshotSyncRoot = new();
     private readonly object _preemptionSnapshotSyncRoot = new();
@@ -75,6 +80,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private int _preemptionTrendMaxYield = 1;
     private string _preemptionHealthLabel = "중지";
     private string _preemptionHealthDescription = "데모를 시작하면 선점 상태를 분석합니다.";
+    private string _preemptionStarvationStatus = "기아 감지: 중지";
+    private double _preemptionStarvationLowStallSeconds = 3.0;
+    private Brush _preemptionStarvationForeground = HealthStoppedForeground;
     private Brush _preemptionHealthBadgeBackground = HealthStoppedBackground;
     private Brush _preemptionHealthBadgeForeground = HealthStoppedForeground;
     private string _preemptionFlowHeadline = "데모를 시작하면 선점 흐름을 단계별로 표시합니다.";
@@ -89,6 +97,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private long _lastNormalRunTick;
     private long _lastHighStartTick;
     private long _preemptionHighLastIntervalTicks;
+    private DateTimeOffset _preemptionSessionStartedAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _preemptionLastLowProgressAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _preemptionLastHighProgressAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _preemptionLastLowStartedAt = DateTimeOffset.MinValue;
+    private long _preemptionLastObservedLowRunCount;
+    private long _preemptionLastObservedHighRunCount;
+    private bool _isPreemptionStarvationDetected;
 
     private string _preemptionActiveTask = "대기 중";
     private Brush _preemptionLowInspectorBackground = InspectorIdleBackground;
@@ -490,6 +505,56 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
     }
 
+    public string PreemptionStarvationStatus
+    {
+        get => _preemptionStarvationStatus;
+        private set
+        {
+            if (_preemptionStarvationStatus == value)
+            {
+                return;
+            }
+
+            _preemptionStarvationStatus = value;
+            OnPropertyChanged(nameof(PreemptionStarvationStatus));
+        }
+    }
+
+    public double PreemptionStarvationLowStallSeconds
+    {
+        get => _preemptionStarvationLowStallSeconds;
+        set
+        {
+            var clamped = Math.Clamp(value, 1.0, 8.0);
+            if (Math.Abs(_preemptionStarvationLowStallSeconds - clamped) < 0.01)
+            {
+                return;
+            }
+
+            _preemptionStarvationLowStallSeconds = clamped;
+            OnPropertyChanged(nameof(PreemptionStarvationLowStallSeconds));
+            OnPropertyChanged(nameof(PreemptionStarvationLowStallLabel));
+        }
+    }
+
+    public string PreemptionStarvationLowStallLabel =>
+        $"기아 판정 지연: {PreemptionStarvationLowStallSeconds:N1}초";
+
+    public Brush PreemptionStarvationForeground
+    {
+        get => _preemptionStarvationForeground;
+        private set
+        {
+            if (ReferenceEquals(_preemptionStarvationForeground, value))
+            {
+                return;
+            }
+
+            _preemptionStarvationForeground = value;
+            OnPropertyChanged(nameof(PreemptionStarvationForeground));
+        }
+    }
+
     public Brush PreemptionHealthBadgeBackground
     {
         get => _preemptionHealthBadgeBackground;
@@ -687,6 +752,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         ResetLowWorkerRuntimeStats();
         _lastTrendSecond = DateTime.MinValue;
         _lastYieldTotalForTrend = 0;
+        _preemptionSessionStartedAt = DateTimeOffset.UtcNow;
+        _preemptionLastLowProgressAt = _preemptionSessionStartedAt;
+        _preemptionLastHighProgressAt = _preemptionSessionStartedAt;
+        _preemptionLastLowStartedAt = DateTimeOffset.MinValue;
+        _preemptionLastObservedLowRunCount = 0;
+        _preemptionLastObservedHighRunCount = 0;
+        _isPreemptionStarvationDetected = false;
         ClearPendingPreemptionLogs();
 
         await _dispatcher.InvokeAsync(() =>
@@ -711,6 +783,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 description: "데모를 시작했고, 첫 실행 데이터를 수집 중입니다.",
                 background: HealthMonitoringBackground,
                 foreground: HealthMonitoringForeground);
+            PreemptionStarvationStatus = "기아 감지: 초기화";
+            PreemptionStarvationForeground = HealthMonitoringForeground;
             SetPreemptionFlow(
                 headline: "초기화 중",
                 detail: "첫 실행 이벤트를 기다리는 중입니다.",
@@ -724,7 +798,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         var demoScheduler = new SchedulerService(
             tickInterval: TimeSpan.FromMilliseconds(5),
             snapshotInterval: TimeSpan.FromMilliseconds(50),
-            timeQuantum: TimeSpan.FromMilliseconds(4));
+            // 데모 태스크(특히 Normal/High)가 최소 1회 작업 단위를 완료할 수 있도록
+            // quantum을 너무 짧게 두지 않는다. (4ms에서는 LOW가 굶주릴 수 있음)
+            timeQuantum: TimeSpan.FromMilliseconds(15));
 
         demoScheduler.SchedulerError += (_, ex) =>
         {
@@ -747,7 +823,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 var count = Interlocked.Increment(ref _preemptionNormalRunCountCounter);
                 Interlocked.Exchange(ref _lastNormalRunTick, DateTime.UtcNow.Ticks);
-                QueuePreemptionLog($"Normal Telemetry(TID={Environment.CurrentManagedThreadId})가 Low 작업 사이에 끼어들었습니다. 누적 실행 횟수={count}");
+                QueuePreemptionLogEvery(
+                    key: "normal-telemetry",
+                    every: 5,
+                    message: $"Normal Telemetry가 누적 {count}회 실행되었습니다.");
                 await Task.Delay(8, cancellationToken).ConfigureAwait(false);
             },
             statusProvider: () => "Medium priority telemetry pulse"));
@@ -773,14 +852,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 var intervalText = previousStartedTicks > 0
                     ? $", 이전 실행 후 {TimeSpan.FromTicks(startedTicks - previousStartedTicks).TotalMilliseconds:N0}ms"
                     : string.Empty;
-                QueuePreemptionLog($"High Priority Urgent(TID={Environment.CurrentManagedThreadId})가 긴급 구간을 시작했습니다. 누적 실행 횟수={count}{intervalText}");
+                QueuePreemptionLogEvery(
+                    key: "high-urgent-start",
+                    every: 3,
+                    message: $"High Priority Urgent가 누적 {count}회 시작되었습니다{intervalText}.");
 
                 for (var burst = 1; burst <= 3; burst++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await Task.Delay(4, cancellationToken).ConfigureAwait(false);
-                    QueuePreemptionLog($"High Priority Urgent burst {burst}/3 완료");
                 }
+
+                QueuePreemptionLogEvery(
+                    key: "high-urgent-burst",
+                    every: 3,
+                    message: $"High Priority Urgent burst 처리 누적 {count}회 완료");
             },
             statusProvider: () => "Critical burst work"));
 
@@ -821,7 +907,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                         Interlocked.Increment(ref _preemptionYieldCountCounter);
                         Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
                         RecordLowWorkerYield(name);
-                        QueuePreemptionLog($"{name}(TID={Environment.CurrentManagedThreadId})가 더 높은 우선순위 task를 감지해 양보했습니다. 진행률={i + 1}/{workUnits}");
+                        var totalYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
+                        QueuePreemptionLogEvery(
+                            key: $"yield-{name}",
+                            every: 4,
+                            message: $"{name} 양보 누적 {totalYieldCount}회 (최근 진행률 {i + 1}/{workUnits})");
                         return;
                     }
 
@@ -830,7 +920,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                     Interlocked.Exchange(ref stats.NextWorkUnit, i + 1);
                 }
 
-                QueuePreemptionLog($"{name}가 긴 low-priority 작업 슬라이스 1회를 완료했습니다. workUnits={workUnits}");
+                QueuePreemptionLogEvery(
+                    key: $"low-complete-{name}",
+                    every: 2,
+                    message: $"{name}가 low 작업 슬라이스를 누적 완료했습니다. workUnits={workUnits}");
                 Interlocked.Exchange(ref stats.NextWorkUnit, 0);
             },
             statusProvider: () =>
@@ -943,7 +1036,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             if (_dispatcher.CheckAccess())
             {
                 _preemptionUiTimer.Stop();
-                DrainPreemptionLogs();
+                DrainPreemptionLogs(force: true);
                 PreemptionTestState = "Stopped";
                 LastPreemptionEvent = "Preemption demo stopped.";
                 PreemptionCurrentExecutionThreadId = 0;
@@ -954,6 +1047,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                     description: "데모가 중지되어 상태 분석을 멈췄습니다.",
                     background: HealthStoppedBackground,
                     foreground: HealthStoppedForeground);
+                PreemptionStarvationStatus = "기아 감지: 중지";
+                PreemptionStarvationForeground = HealthStoppedForeground;
                 SetPreemptionFlow(
                     headline: "중지",
                     detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
@@ -967,7 +1062,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 await _dispatcher.InvokeAsync(() =>
                 {
                     _preemptionUiTimer.Stop();
-                    DrainPreemptionLogs();
+                    DrainPreemptionLogs(force: true);
                     PreemptionTestState = "Stopped";
                     LastPreemptionEvent = "Preemption demo stopped.";
                     PreemptionCurrentExecutionThreadId = 0;
@@ -978,6 +1073,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                         description: "데모가 중지되어 상태 분석을 멈췄습니다.",
                         background: HealthStoppedBackground,
                         foreground: HealthStoppedForeground);
+                    PreemptionStarvationStatus = "기아 감지: 중지";
+                    PreemptionStarvationForeground = HealthStoppedForeground;
                     SetPreemptionFlow(
                         headline: "중지",
                         detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
@@ -1052,7 +1149,30 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
     private void QueuePreemptionLog(string message)
     {
+        var pendingCount = Interlocked.Increment(ref _pendingPreemptionLogCount);
+        if (pendingCount > MaxPendingPreemptionLogs)
+        {
+            Interlocked.Decrement(ref _pendingPreemptionLogCount);
+            Interlocked.Increment(ref _suppressedPreemptionLogCount);
+            return;
+        }
+
         _pendingPreemptionLogs.Enqueue(message);
+    }
+
+    private void QueuePreemptionLogEvery(string key, int every, string message)
+    {
+        if (every <= 1)
+        {
+            QueuePreemptionLog(message);
+            return;
+        }
+
+        var count = _preemptionLogOccurrenceCounts.AddOrUpdate(key, 1, static (_, current) => current + 1);
+        if (count % every == 0)
+        {
+            QueuePreemptionLog(message);
+        }
     }
 
     private void ClearPendingPreemptionLogs()
@@ -1060,20 +1180,61 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         while (_pendingPreemptionLogs.TryDequeue(out _))
         {
         }
+
+        Interlocked.Exchange(ref _pendingPreemptionLogCount, 0);
+        Interlocked.Exchange(ref _suppressedPreemptionLogCount, 0);
+        _preemptionLogOccurrenceCounts.Clear();
+        _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
     }
 
-    private void DrainPreemptionLogs()
+    private void DrainPreemptionLogs(bool force = false)
     {
+        var now = DateTimeOffset.UtcNow;
+        if (!force && _lastPreemptionLogFlushAt != DateTimeOffset.MinValue)
+        {
+            var elapsed = now - _lastPreemptionLogFlushAt;
+            if (elapsed < TimeSpan.FromSeconds(1))
+            {
+                return;
+            }
+        }
+
+        _lastPreemptionLogFlushAt = now;
+
+        var drainedCount = 0;
+        string? latestMessage = null;
         while (_pendingPreemptionLogs.TryDequeue(out var message))
         {
-            AppendPreemptionLog(message);
+            Interlocked.Decrement(ref _pendingPreemptionLogCount);
+            latestMessage = message;
+            drainedCount++;
         }
+
+        var suppressedCount = Interlocked.Exchange(ref _suppressedPreemptionLogCount, 0);
+
+        if (drainedCount == 0 && suppressedCount == 0)
+        {
+            return;
+        }
+
+        var summary = suppressedCount > 0
+            ? $"1초 요약: 신규 이벤트 {drainedCount}건, 생략 {suppressedCount}건"
+            : $"1초 요약: 신규 이벤트 {drainedCount}건";
+
+        if (!string.IsNullOrWhiteSpace(latestMessage))
+        {
+            summary = $"{summary} / 최근: {latestMessage}";
+        }
+
+        AppendPreemptionLog(summary);
     }
 
     private void UpdatePreemptionHealthStatus()
     {
         if (!_isPreemptionTestRunning)
         {
+            PreemptionStarvationStatus = "기아 감지: 중지";
+            PreemptionStarvationForeground = HealthStoppedForeground;
             SetPreemptionHealth(
                 label: "중지",
                 description: "데모를 시작하면 선점 상태를 분석합니다.",
@@ -1081,6 +1242,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 foreground: HealthStoppedForeground);
             return;
         }
+
+        if (_isPreemptionStarvationDetected)
+        {
+            SetPreemptionHealth(
+                label: "주의",
+                description: "상위 우선순위는 진행 중인데 LOW RunCount/LastStartedAt 갱신이 지연됩니다.",
+                background: HealthWarningBackground,
+                foreground: HealthWarningForeground);
+            PreemptionStarvationStatus = "기아 감지: 주의 (LOW 진행 정체)";
+            PreemptionStarvationForeground = HealthWarningForeground;
+            return;
+        }
+
+        PreemptionStarvationStatus = "기아 감지: 정상";
+        PreemptionStarvationForeground = HealthGoodForeground;
 
         if (PreemptionHighRunCount < 2)
         {
@@ -1293,6 +1469,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             return;
         }
 
+        UpdatePreemptionStarvationSignal(snapshot);
+
         foreach (var task in snapshot.Tasks)
         {
             if (_preemptionTaskViewModels.TryGetValue(task.Name, out var taskViewModel))
@@ -1305,6 +1483,70 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
 
         SyncActiveTasks(snapshot, _preemptionActiveTaskNames);
+    }
+
+    private void UpdatePreemptionStarvationSignal(SchedulerSnapshot snapshot)
+    {
+        if (!_isPreemptionTestRunning)
+        {
+            _isPreemptionStarvationDetected = false;
+            return;
+        }
+
+        var lowTasks = snapshot.Tasks
+            .Where(task => task.Name.StartsWith("Low Worker", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (lowTasks.Length == 0)
+        {
+            _isPreemptionStarvationDetected = false;
+            return;
+        }
+
+        var higherPriorityTasks = snapshot.Tasks
+            .Where(task => task.Priority > Enum_TaskPriority.Low)
+            .ToArray();
+
+        var lowRunCount = lowTasks.Sum(task => task.RunCount);
+        var higherRunCount = higherPriorityTasks.Sum(task => task.RunCount);
+        var latestLowStartedAt = lowTasks
+            .Where(task => task.LastStartedAt.HasValue)
+            .Select(task => task.LastStartedAt!.Value)
+            .DefaultIfEmpty(DateTimeOffset.MinValue)
+            .Max();
+
+        if (lowRunCount > _preemptionLastObservedLowRunCount)
+        {
+            _preemptionLastLowProgressAt = snapshot.CreatedAt;
+            _preemptionLastObservedLowRunCount = lowRunCount;
+        }
+
+        if (higherRunCount > _preemptionLastObservedHighRunCount)
+        {
+            _preemptionLastHighProgressAt = snapshot.CreatedAt;
+            _preemptionLastObservedHighRunCount = higherRunCount;
+        }
+
+        if (latestLowStartedAt != DateTimeOffset.MinValue)
+        {
+            _preemptionLastLowStartedAt = latestLowStartedAt;
+        }
+
+        var now = snapshot.CreatedAt;
+        var lowStallThreshold = TimeSpan.FromSeconds(PreemptionStarvationLowStallSeconds);
+        var highRecentlyProgressed = _preemptionLastHighProgressAt != DateTimeOffset.MinValue
+            && now - _preemptionLastHighProgressAt <= TimeSpan.FromSeconds(1.5);
+        var lowProgressStalled = now - _preemptionLastLowProgressAt >= lowStallThreshold;
+        var lowStartStalled = _preemptionLastLowStartedAt == DateTimeOffset.MinValue
+            || now - _preemptionLastLowStartedAt >= lowStallThreshold;
+        var readyOrRunningHigher = higherPriorityTasks.Any(task => task.State is Enum_TaskState.Ready or Enum_TaskState.Running);
+        var enoughWarmupTime = now - _preemptionSessionStartedAt >= TimeSpan.FromSeconds(2);
+
+        _isPreemptionStarvationDetected = enoughWarmupTime
+            && highRecentlyProgressed
+            && readyOrRunningHigher
+            && lowProgressStalled
+            && lowStartStalled;
     }
 
     private void ApplyLatestSnapshot()
@@ -1347,15 +1589,23 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         SchedulerSnapshot snapshot,
         HashSet<string> activeTaskNames)
     {
-        activeTaskNames.Clear();
+        var updatedActiveTaskNames = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var task in snapshot.Tasks)
         {
             if (task.IsEnabled)
             {
-                activeTaskNames.Add(task.Name);
+                updatedActiveTaskNames.Add(task.Name);
             }
         }
+
+        if (activeTaskNames.SetEquals(updatedActiveTaskNames))
+        {
+            return;
+        }
+
+        activeTaskNames.Clear();
+        activeTaskNames.UnionWith(updatedActiveTaskNames);
 
         RebuildActiveTasks();
     }

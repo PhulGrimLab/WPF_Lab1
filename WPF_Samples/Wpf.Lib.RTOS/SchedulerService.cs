@@ -526,7 +526,6 @@ namespace Wpf.Lib.RTOS
         {
             var runningPriority = TryGetTaskValue(runningTask, task => task.Priority, Enum_TaskPriority.Low);
             var now = DateTimeOffset.Now;
-            List<IScheduledTask> candidates;
 
             lock (_syncRoot)
             {
@@ -535,38 +534,36 @@ namespace Wpf.Lib.RTOS
                     return false;
                 }
 
-                candidates = new List<IScheduledTask>(_tasks);
-            }
-
-            foreach (var candidate in candidates)
-            {
-                if (ReferenceEquals(candidate, runningTask))
+                foreach (var candidate in _tasks)
                 {
-                    continue;
-                }
+                    if (ReferenceEquals(candidate, runningTask))
+                    {
+                        continue;
+                    }
 
-                if (!IsTaskRegistered(candidate))
-                {
-                    continue;
-                }
+                    if (!_runtimeInfos.ContainsKey(candidate))
+                    {
+                        continue;
+                    }
 
-                if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
-                {
-                    continue;
-                }
+                    if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
+                    {
+                        continue;
+                    }
 
-                var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
-                if (candidatePriority <= runningPriority)
-                {
-                    continue;
-                }
+                    var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
+                    if (candidatePriority <= runningPriority)
+                    {
+                        continue;
+                    }
 
-                var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
+                    var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
 
-                // "더 높은 우선순위" + "지금 실행 가능"이면 양보 신호를 true로 준다.
-                if (candidateNextRunAt <= now)
-                {
-                    return true;
+                    // "더 높은 우선순위" + "지금 실행 가능"이면 양보 신호를 true로 준다.
+                    if (candidateNextRunAt <= now)
+                    {
+                        return true;
+                    }
                 }
             }
 
