@@ -189,7 +189,12 @@ I/O 대기나 await를 lock 내부에서 하지 않습니다.
 - 긴 루프면 context.ShouldYield() 체크 지점 추가
 
 2. 등록
-- MainWindowViewModel 또는 조합 계층에서 Register
+- 라이브러리 조합 계층(예: SchedulerMonitorDemo)에서 Register
+
+현재 구조 메모:
+
+- WpfSamples/MainWindowViewModel은 실행 주체가 아니라 표시 계층입니다.
+- RTOS Monitor 샘플 태스크 등록 책임은 Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs에 있습니다.
 
 3. UI 노출 필요 시
 - SnapshotChanged 데이터 바인딩 경로 확인
@@ -251,7 +256,7 @@ I/O 대기나 await를 lock 내부에서 하지 않습니다.
 
 ---
 
-## 8-1. 선점 데모 튜닝 가이드 (로그/기아/UI)
+## 8-1. 선점 데모 튜닝 가이드 (로그/기아/표시 계층)
 
 최근 데모 안정화에서 실제로 효과가 있었던 조합입니다.
 

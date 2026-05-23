@@ -69,6 +69,19 @@ namespace Wpf.Lib.RTOS
         public RtosTraceLog TraceLog { get; } = new();
 
         /// <summary>
+        /// 현재 등록된 task 목록과 실행 상태를 읽기 전용 snapshot으로 반환합니다.
+        /// </summary>
+        public SchedulerSnapshot GetSnapshot()
+        {
+            ThrowIfDisposed();
+
+            return new SchedulerSnapshot(
+                DateTimeOffset.Now,
+                IsRunning,
+                CreateTaskSnapshots());
+        }
+
+        /// <summary>
         /// 스케줄러가 현재 실행 중인지 나타냅니다.
         /// </summary>
         public bool IsRunning

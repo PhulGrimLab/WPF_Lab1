@@ -132,8 +132,9 @@ MainWindow.xaml
 2. `SchedulerTaskBase.cs`
 3. `SchedulerService.cs`
 4. `ScheduledTaskSnapshot.cs`
-5. `WpfSamples/Samples_RTOS/CounterTask.cs`
-6. `WpfSamples/MainWindowViewModel.cs`
+5. `Wpf.Lib.RTOS/Tasks/SampleTasks.cs`
+6. `Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs`
+7. `WpfSamples/MainWindowViewModel.cs`
 
 `IScheduledTask`는 "태스크가 갖춰야 할 약속"이고, `SchedulerService`는 그 약속을 가진 태스크들을 실제로 실행하는 관리자입니다.
 

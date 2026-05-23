@@ -23,12 +23,14 @@
 ```text
 WpfSamples (UI)
   └─ MainWindowViewModel
-      ├─ SchedulerService 시작/정지
-      ├─ 샘플 태스크 등록
+      ├─ SchedulerMonitorDemo/PreemptionDemo/DiningPhilosophersDemo 시작/정지
       └─ SnapshotChanged 이벤트로 화면 갱신
 
 Wpf.Lib.RTOS (라이브러리)
   ├─ SchedulerService           // 실행 엔진
+  ├─ Tasks/SchedulerMonitorDemo // RTOS Monitor 데모 조합
+  ├─ Tasks/PreemptionDemo       // 선점 데모 조합
+  ├─ Tasks/DiningPhilosophersDemo // 철학자 데모 조합
   ├─ IScheduledTask             // 태스크 규약
   ├─ SchedulerTaskBase          // 태스크 기본 구현
   ├─ ScheduledTask              // 람다로 만드는 간단 태스크
@@ -202,7 +204,7 @@ SchedulerService는 태스크마다 TaskRuntimeInfo를 유지합니다.
 | Suspended | `SetEnabled(true)` + 다음 시각 도래 전 | Blocked |
 | Suspended | `SetEnabled(true)` + 다음 시각 도래 | Ready |
 
-### 5-3. 모니터 탭과 선점 데모에서 상태가 다르게 보이는 이유
+### 5-3. 모니터 샘플 태스크와 선점 데모에서 상태가 다르게 보이는 이유
 
 1. RTOS Monitor 샘플 태스크
 - 주기가 상대적으로 길어(100ms/250ms/1s) 대기 시간이 많음
@@ -342,7 +344,7 @@ Task.Delay 기반 소프트웨어 타이머입니다.
 9) RtosEventFlags.cs
 10) RtosMessageQueue.cs
 11) RtosSoftwareTimer.cs
-12) WpfSamples/Samples_RTOS/*.cs
+12) Wpf.Lib.RTOS/Tasks/*.cs
 13) WpfSamples/MainWindowViewModel.cs
 
 ---
@@ -956,7 +958,7 @@ while (!token.IsCancellationRequested)
 
 ---
 
-## 21. 선점 데모 코드 상세 설명 (UI 스레드 제외 원칙)
+## 21. 선점 데모 코드 상세 설명 (표시 계층 스레드 제외 원칙)
 
 최근 변경의 핵심은 다음 한 문장입니다.
 
@@ -974,7 +976,7 @@ WPF UI 스레드는 화면 이벤트 루프를 담당하는 특수 스레드입�
 그래서 현재 데모는 아래처럼 분리해서 보여줍니다.
 
 1. 현재 실행 TID: RTOS 태스크 실행 스레드
-2. 참고 UI TID: 표시만 하되 선점 판정에서는 제외
+2. 참고 UI TID: 표시 정보로만 사용하며 선점 판정에서는 제외
 
 ### 21-2. StartPreemptionTestAsync에서 실제로 하는 일
 

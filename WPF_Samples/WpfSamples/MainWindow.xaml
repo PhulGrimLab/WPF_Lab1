@@ -761,6 +761,263 @@
                     </ScrollViewer>
                 </TabItem>
 
+                <TabItem Header="철학자의 식사">
+                    <ScrollViewer Margin="0,12,0,0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="0,0,10,0">
+                        <StackPanel>
+                            <Border Background="#F8FAFC"
+                                    BorderBrush="#CBD5E1"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="14"
+                                    Margin="0,0,0,12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button Content="시작"
+                                            Command="{Binding StartDiningCommand}"
+                                            ToolTip="철학자의 식사 데모를 시작합니다."/>
+                                    <Button Grid.Column="1"
+                                            Content="중지"
+                                            Command="{Binding StopDiningCommand}"
+                                            ToolTip="철학자의 식사 데모를 중지합니다."/>
+                                    <Button Grid.Column="2"
+                                            Content="초기화"
+                                            Command="{Binding ResetDiningCommand}"
+                                            ToolTip="식사 횟수, 대기 횟수, 로그를 초기화합니다."/>
+
+                                    <StackPanel Grid.Column="3"
+                                                Orientation="Horizontal"
+                                                Margin="10,0,0,0"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="상태:"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#334155"/>
+                                        <TextBlock Text="{Binding DiningState}"
+                                                   Margin="6,0,0,0"
+                                                   Foreground="#0F172A"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="4"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="시간:"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#334155"/>
+                                        <TextBlock Text="{Binding DiningElapsed}"
+                                                   Margin="6,0,0,0"
+                                                   Foreground="#0F172A"/>
+                                    </StackPanel>
+
+                                    <TextBlock Grid.Column="5"
+                                               Text="{Binding DiningSummary}"
+                                               Foreground="#475569"
+                                               TextWrapping="Wrap"
+                                               Margin="12,0,0,0"/>
+
+                                    <TextBlock Grid.Row="1"
+                                               Grid.ColumnSpan="4"
+                                               Text="{Binding DiningLastEvent, StringFormat=최근 이벤트: {0}}"
+                                               Foreground="#1E3A8A"
+                                               FontWeight="SemiBold"
+                                               Margin="0,10,0,0"
+                                               TextWrapping="Wrap"/>
+
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="4"
+                                               Grid.ColumnSpan="2"
+                                               Text="{Binding DiningConcurrentEatingStatus}"
+                                               Foreground="#065F46"
+                                               FontWeight="SemiBold"
+                                               Margin="10,10,0,0"
+                                               HorizontalAlignment="Right"
+                                               TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+
+                            <ItemsControl ItemsSource="{Binding DiningPhilosophers}"
+                                          Margin="0,0,0,12">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Rows="1"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{Binding CardBackground}"
+                                                BorderBrush="{Binding AccentBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="12"
+                                                Margin="0,0,8,0"
+                                                MinHeight="190">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="*"/>
+                                                </Grid.RowDefinitions>
+
+                                                <DockPanel>
+                                                    <Ellipse Width="12"
+                                                             Height="12"
+                                                             Fill="{Binding AccentBrush}"
+                                                             Margin="0,0,8,0"
+                                                             DockPanel.Dock="Left"/>
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#0F172A"
+                                                               FontSize="15"/>
+                                                </DockPanel>
+
+                                                <Border Grid.Row="1"
+                                                        Background="White"
+                                                        CornerRadius="999"
+                                                        Padding="8,3"
+                                                        HorizontalAlignment="Left"
+                                                        Margin="0,10,0,0">
+                                                    <TextBlock Text="{Binding State}"
+                                                               Foreground="#0F172A"
+                                                               FontWeight="SemiBold"/>
+                                                </Border>
+
+                                                <TextBlock Grid.Row="2"
+                                                           Text="{Binding Detail}"
+                                                           Foreground="#334155"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,10,0,0"/>
+
+                                                <ProgressBar Grid.Row="3"
+                                                             Minimum="0"
+                                                             Maximum="100"
+                                                             Value="{Binding ActivityProgress, Mode=OneWay}"
+                                                             Height="12"
+                                                             Margin="0,10,0,0"/>
+
+                                                <StackPanel Grid.Row="4"
+                                                            Margin="0,10,0,0">
+                                                    <TextBlock Text="{Binding LeftForkState}"
+                                                               Foreground="#475569"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding RightForkState}"
+                                                               Foreground="#475569"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="0,3,0,0"/>
+                                                </StackPanel>
+
+                                                <Grid Grid.Row="5"
+                                                      Margin="0,10,0,0"
+                                                      VerticalAlignment="Bottom">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding MealCount, StringFormat=식사 {0}회}"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#065F46"/>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding WaitCount, StringFormat=대기 {0}회}"
+                                                               HorizontalAlignment="Right"
+                                                               Foreground="#92400E"/>
+                                                </Grid>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*"/>
+                                    <ColumnDefinition Width="3*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Border Background="White"
+                                        BorderBrush="#D7DCE2"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="12"
+                                        Margin="0,0,8,0">
+                                    <StackPanel>
+                                        <TextBlock Text="포크 점유 상태"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#334155"
+                                                   Margin="0,0,0,8"/>
+                                        <ItemsControl ItemsSource="{Binding DiningForks}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{Binding Background}"
+                                                            BorderBrush="{Binding AccentBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4"
+                                                            Padding="9"
+                                                            Margin="0,0,0,7">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="90"/>
+                                                                <ColumnDefinition Width="80"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Name}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="#0F172A"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding State}"
+                                                                       Foreground="#334155"/>
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding Holder}"
+                                                                       Foreground="#334155"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Background="White"
+                                        BorderBrush="#D7DCE2"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="12">
+                                    <DockPanel>
+                                        <TextBlock Text="실시간 이벤트 로그"
+                                                   DockPanel.Dock="Top"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#334155"
+                                                   Margin="0,0,0,8"/>
+                                        <ListBox ItemsSource="{Binding DiningLogs}"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 FontFamily="Consolas"
+                                                 FontSize="12"
+                                                 MaxHeight="230"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
                 <TabItem Header="RTOS Tests">
                     <Grid Margin="0,12,0,0">
                         <Grid.RowDefinitions>

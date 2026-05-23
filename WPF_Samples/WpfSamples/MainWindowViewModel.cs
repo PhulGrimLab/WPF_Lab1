@@ -1,5 +1,4 @@
-using System.Collections.Concurrent;
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Threading;
@@ -8,13 +7,11 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Wpf.Lib.RTOS;
 using WpfSamples.Tests;
-using WpfSamples.Samples_RTOS;
 
 namespace WpfSamples;
 
 internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable, IAsyncDisposable
 {
-    private const int MaxPendingPreemptionLogs = 300;
     private static readonly Brush HealthStoppedBackground = new SolidColorBrush(Color.FromRgb(229, 231, 235));
     private static readonly Brush HealthStoppedForeground = new SolidColorBrush(Color.FromRgb(55, 65, 81));
     private static readonly Brush HealthGoodBackground = new SolidColorBrush(Color.FromRgb(220, 252, 231));
@@ -33,32 +30,48 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private static readonly Brush InspectorHighActiveBorder = new SolidColorBrush(Color.FromRgb(252, 165, 165));
     private static readonly Brush InspectorCurrentActiveBackground = new SolidColorBrush(Color.FromRgb(219, 234, 254));
     private static readonly Brush InspectorCurrentActiveBorder = new SolidColorBrush(Color.FromRgb(147, 197, 253));
+    private static readonly Brush DiningThinkingBackground = new SolidColorBrush(Color.FromRgb(239, 246, 255));
+    private static readonly Brush DiningThinkingAccent = new SolidColorBrush(Color.FromRgb(37, 99, 235));
+    private static readonly Brush DiningHungryBackground = new SolidColorBrush(Color.FromRgb(255, 251, 235));
+    private static readonly Brush DiningHungryAccent = new SolidColorBrush(Color.FromRgb(217, 119, 6));
+    private static readonly Brush DiningEatingBackground = new SolidColorBrush(Color.FromRgb(220, 252, 231));
+    private static readonly Brush DiningEatingAccent = new SolidColorBrush(Color.FromRgb(22, 163, 74));
+    private static readonly Brush DiningIdleBackground = new SolidColorBrush(Color.FromRgb(248, 250, 252));
+    private static readonly Brush DiningIdleAccent = new SolidColorBrush(Color.FromRgb(100, 116, 139));
+    private static readonly Brush DiningForkAvailableBrush = new SolidColorBrush(Color.FromRgb(209, 250, 229));
+    private static readonly Brush DiningForkHeldBrush = new SolidColorBrush(Color.FromRgb(254, 226, 226));
 
-    private readonly SchedulerService _scheduler = new();
-    private SchedulerService? _preemptionTestScheduler;
+    private readonly SchedulerMonitorDemo _monitorDemo = new();
+    private readonly DiningPhilosophersDemo _diningDemo = new();
+    private readonly PreemptionDemo _preemptionDemo = new();
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _preemptionUiTimer;
-    private readonly ConcurrentQueue<string> _pendingPreemptionLogs = new();
-    private readonly ConcurrentDictionary<string, int> _preemptionLogOccurrenceCounts = new();
-    private int _pendingPreemptionLogCount;
-    private int _suppressedPreemptionLogCount;
-    private DateTimeOffset _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
-    private readonly ConcurrentDictionary<string, LowWorkerRuntimeStats> _lowWorkerRuntimeStats = new();
+    private readonly DispatcherTimer _diningUiTimer;
     private readonly object _snapshotSyncRoot = new();
     private readonly object _preemptionSnapshotSyncRoot = new();
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _taskViewModels = [];
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _preemptionTaskViewModels = [];
+    private readonly Dictionary<string, ScheduledTaskStatusViewModel> _diningTaskViewModels = [];
     private readonly Dictionary<string, LowWorkerYieldStatsViewModel> _lowWorkerYieldViewModels = [];
     private readonly HashSet<string> _mainActiveTaskNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _preemptionActiveTaskNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _diningActiveTaskNames = new(StringComparer.Ordinal);
     private SchedulerSnapshot? _latestSnapshot;
     private SchedulerSnapshot? _latestPreemptionSnapshot;
     private bool _isSnapshotApplyQueued;
     private bool _isRunningTests;
     private bool _isPreemptionTestRunning;
+    private bool _isDiningRunning;
     private string _schedulerState = "Stopped";
     private string _lastSnapshotAt = "-";
     private string _testSummary = "Not run";
+    private string _diningState = "중지";
+    private string _diningElapsed = "-";
+    private string _diningSummary = "시작하면 5명의 철학자가 생각하기, 배고픔, 식사 상태를 반복합니다.";
+    private string _diningLastEvent = "-";
+    private string _diningConcurrentEatingStatus = "동시 식사: 0명 (최대 0명)";
+    private int _diningMaxConcurrentEating;
+    private DateTimeOffset _diningSessionStartedAt = DateTimeOffset.MinValue;
     private string _preemptionTestState = "Stopped";
     private string _lastPreemptionEvent = "-";
     private string _preemptionHighLastInterval = "-";
@@ -68,15 +81,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private int _preemptionLowLastThreadId;
     private int _preemptionHighLastThreadId;
     private int _preemptionCurrentExecutionThreadId;
-    private int _preemptionLowWorkUnitsCounter;
-    private int _preemptionHighRunCountCounter;
-    private int _preemptionYieldCountCounter;
-    private int _preemptionLowLastThreadIdCounter;
-    private int _preemptionHighLastThreadIdCounter;
-    private int _preemptionNormalRunCountCounter;
-    private int _preemptionNormalLastThreadIdCounter;
-    private DateTime _lastTrendSecond = DateTime.MinValue;
-    private int _lastYieldTotalForTrend;
     private int _preemptionTrendMaxYield = 1;
     private string _preemptionHealthLabel = "중지";
     private string _preemptionHealthDescription = "데모를 시작하면 선점 상태를 분석합니다.";
@@ -91,20 +95,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private Brush _preemptionYieldStepBrush = FlowIdleBrush;
     private Brush _preemptionHighStepBrush = FlowIdleBrush;
 
-    private long _lastLowWorkTick;
-    private long _lastYieldTick;
-    private long _lastHighRunTick;
-    private long _lastNormalRunTick;
-    private long _lastHighStartTick;
-    private long _preemptionHighLastIntervalTicks;
-    private DateTimeOffset _preemptionSessionStartedAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _preemptionLastLowProgressAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _preemptionLastHighProgressAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _preemptionLastLowStartedAt = DateTimeOffset.MinValue;
-    private long _preemptionLastObservedLowRunCount;
-    private long _preemptionLastObservedHighRunCount;
-    private bool _isPreemptionStarvationDetected;
-
     private string _preemptionActiveTask = "대기 중";
     private Brush _preemptionLowInspectorBackground = InspectorIdleBackground;
     private Brush _preemptionLowInspectorBorder = InspectorIdleBorder;
@@ -118,15 +108,20 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _dispatcher = Application.Current.Dispatcher;
         _preemptionUiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(30),
+            Interval = TimeSpan.FromMilliseconds(80),
         };
         _preemptionUiTimer.Tick += OnPreemptionUiTimerTick;
+        _diningUiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(100),
+        };
+        _diningUiTimer.Tick += OnDiningUiTimerTick;
 
-        StartCommand = new RelayCommand(StartScheduler, () => !_scheduler.IsRunning);
+        StartCommand = new RelayCommand(StartScheduler, () => !_monitorDemo.IsRunning);
 
         StopCommand = new RelayCommand(
             () => _ = StopSchedulerAsync(),
-            () => _scheduler.IsRunning);
+            () => _monitorDemo.IsRunning);
 
         RunTestsCommand = new RelayCommand(
             () => _ = RunTestsAsync(),
@@ -140,10 +135,25 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             () => _ = StopPreemptionTestAsync(),
             () => _isPreemptionTestRunning);
 
-        _scheduler.SnapshotChanged += OnSchedulerSnapshotChanged;
+        StartDiningCommand = new RelayCommand(
+            StartDiningDemo,
+            () => !_isDiningRunning && !_isRunningTests);
 
-        // Samples_RTOS의 Task 파일 등록
-        RegisterSampleTasks();
+        StopDiningCommand = new RelayCommand(
+            () => _ = StopDiningDemoAsync(),
+            () => _isDiningRunning);
+
+        ResetDiningCommand = new RelayCommand(
+            ResetDiningDemo,
+            () => !_isDiningRunning);
+
+        _monitorDemo.SnapshotChanged += OnSchedulerSnapshotChanged;
+        _diningDemo.SnapshotChanged += OnDiningDemoSnapshotChanged;
+        _diningDemo.SchedulerSnapshotChanged += OnDiningSchedulerSnapshotChanged;
+        _preemptionDemo.SchedulerSnapshotChanged += OnPreemptionSchedulerSnapshotChanged;
+
+        ApplyLatestSnapshot(_monitorDemo.CurrentSnapshot);
+        ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -154,12 +164,18 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     public ObservableCollection<string> PreemptionLogs { get; } = [];
     public ObservableCollection<PreemptionTrendPointViewModel> PreemptionYieldTrend { get; } = [];
     public ObservableCollection<LowWorkerYieldStatsViewModel> PreemptionLowWorkerYields { get; } = [];
+    public ObservableCollection<DiningPhilosopherViewModel> DiningPhilosophers { get; } = [];
+    public ObservableCollection<DiningForkViewModel> DiningForks { get; } = [];
+    public ObservableCollection<string> DiningLogs { get; } = [];
 
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand RunTestsCommand { get; }
     public RelayCommand StartPreemptionTestCommand { get; }
     public RelayCommand StopPreemptionTestCommand { get; }
+    public RelayCommand StartDiningCommand { get; }
+    public RelayCommand StopDiningCommand { get; }
+    public RelayCommand ResetDiningCommand { get; }
 
     public string SchedulerState
     {
@@ -203,6 +219,81 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
             _testSummary = value;
             OnPropertyChanged(nameof(TestSummary));
+        }
+    }
+
+    public string DiningState
+    {
+        get => _diningState;
+        private set
+        {
+            if (_diningState == value)
+            {
+                return;
+            }
+
+            _diningState = value;
+            OnPropertyChanged(nameof(DiningState));
+        }
+    }
+
+    public string DiningElapsed
+    {
+        get => _diningElapsed;
+        private set
+        {
+            if (_diningElapsed == value)
+            {
+                return;
+            }
+
+            _diningElapsed = value;
+            OnPropertyChanged(nameof(DiningElapsed));
+        }
+    }
+
+    public string DiningSummary
+    {
+        get => _diningSummary;
+        private set
+        {
+            if (_diningSummary == value)
+            {
+                return;
+            }
+
+            _diningSummary = value;
+            OnPropertyChanged(nameof(DiningSummary));
+        }
+    }
+
+    public string DiningLastEvent
+    {
+        get => _diningLastEvent;
+        private set
+        {
+            if (_diningLastEvent == value)
+            {
+                return;
+            }
+
+            _diningLastEvent = value;
+            OnPropertyChanged(nameof(DiningLastEvent));
+        }
+    }
+
+    public string DiningConcurrentEatingStatus
+    {
+        get => _diningConcurrentEatingStatus;
+        private set
+        {
+            if (_diningConcurrentEatingStatus == value)
+            {
+                return;
+            }
+
+            _diningConcurrentEatingStatus = value;
+            OnPropertyChanged(nameof(DiningConcurrentEatingStatus));
         }
     }
 
@@ -532,6 +623,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             }
 
             _preemptionStarvationLowStallSeconds = clamped;
+            _preemptionDemo.StarvationLowStallSeconds = clamped;
             OnPropertyChanged(nameof(PreemptionStarvationLowStallSeconds));
             OnPropertyChanged(nameof(PreemptionStarvationLowStallLabel));
         }
@@ -673,29 +765,30 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
     public async ValueTask DisposeAsync()
     {
-        _scheduler.SnapshotChanged -= OnSchedulerSnapshotChanged;
+        _monitorDemo.SnapshotChanged -= OnSchedulerSnapshotChanged;
+        _diningDemo.SnapshotChanged -= OnDiningDemoSnapshotChanged;
+        _diningDemo.SchedulerSnapshotChanged -= OnDiningSchedulerSnapshotChanged;
+        _preemptionDemo.SchedulerSnapshotChanged -= OnPreemptionSchedulerSnapshotChanged;
         _preemptionUiTimer.Stop();
         _preemptionUiTimer.Tick -= OnPreemptionUiTimerTick;
+        _diningUiTimer.Stop();
+        _diningUiTimer.Tick -= OnDiningUiTimerTick;
+        await StopDiningDemoAsync().ConfigureAwait(false);
         await StopPreemptionTestAsync().ConfigureAwait(false);
-        _scheduler.Dispose();
-    }
-
-    private void RegisterSampleTasks()
-    {
-        _scheduler.Register(new CounterTask());
-        _scheduler.Register(new ClockTask());
-        _scheduler.Register(new UiRefreshTask());
+        await _diningDemo.DisposeAsync().ConfigureAwait(false);
+        await _preemptionDemo.DisposeAsync().ConfigureAwait(false);
+        await _monitorDemo.DisposeAsync().ConfigureAwait(false);
     }
 
     private void StartScheduler()
     {
-        _scheduler.Start();
+        _monitorDemo.Start();
         RefreshCommandStates();
     }
 
     private async Task StopSchedulerAsync()
     {
-        await _scheduler.StopAsync().ConfigureAwait(false);
+        _ = await _monitorDemo.StopAsync().ConfigureAwait(false);
 
         await _dispatcher.InvokeAsync(RefreshCommandStates);
     }
@@ -726,6 +819,335 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         });
     }
 
+    private void StartDiningDemo()
+    {
+        _diningDemo.Start();
+        _isDiningRunning = true;
+        _diningUiTimer.Start();
+        RefreshCommandStates();
+    }
+
+    private async Task StopDiningDemoAsync()
+    {
+        var stopped = await _diningDemo.StopAsync().ConfigureAwait(false);
+        if (!stopped)
+        {
+            await _dispatcher.InvokeAsync(() =>
+            {
+                ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
+                RefreshCommandStates();
+            });
+            return;
+        }
+
+        _isDiningRunning = false;
+        _diningUiTimer.Stop();
+        await _dispatcher.InvokeAsync(() =>
+        {
+            ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
+            ClearDiningActiveTasks();
+            RefreshCommandStates();
+        });
+    }
+
+    private void ResetDiningDemo()
+    {
+        _diningDemo.Reset();
+        _isDiningRunning = _diningDemo.IsRunning;
+        ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
+        RefreshCommandStates();
+    }
+
+    private void OnDiningUiTimerTick(object? sender, EventArgs e)
+    {
+        ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
+    }
+
+    private void OnDiningDemoSnapshotChanged(object? sender, DiningPhilosophersSnapshot snapshot)
+    {
+        _dispatcher.BeginInvoke(() => ApplyDiningSnapshot(snapshot), DispatcherPriority.Background);
+    }
+
+    private void OnDiningSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
+    {
+        _dispatcher.BeginInvoke(() => ApplyDiningSchedulerSnapshot(snapshot), DispatcherPriority.Background);
+    }
+
+    private void ApplyDiningSchedulerSnapshot(SchedulerSnapshot snapshot)
+    {
+        foreach (var task in snapshot.Tasks)
+        {
+            if (_diningTaskViewModels.TryGetValue(task.Name, out var taskViewModel))
+            {
+                taskViewModel.Update(task);
+                continue;
+            }
+
+            _diningTaskViewModels[task.Name] = new ScheduledTaskStatusViewModel(task);
+        }
+
+        SyncActiveTasks(snapshot, _diningActiveTaskNames);
+    }
+
+    private void ApplyDiningSnapshot(DiningPhilosophersSnapshot snapshot)
+    {
+        _isDiningRunning = snapshot.IsRunning;
+        DiningState = snapshot.IsRunning ? "실행 중" : "중지";
+        DiningElapsed = snapshot.IsRunning && snapshot.StartedAt != DateTimeOffset.MinValue
+            ? (DateTimeOffset.Now - snapshot.StartedAt).ToString(@"mm\:ss\.f", CultureInfo.InvariantCulture)
+            : "-";
+
+        UpdateDiningConcurrentEatingStatus(snapshot);
+
+        SyncDiningPhilosophers(snapshot.Philosophers);
+        SyncDiningForks(snapshot.Forks);
+        SyncDiningLogs(snapshot.Logs);
+        DiningSummary = BuildDiningSummary(snapshot);
+        DiningLastEvent = snapshot.Logs.Count > 0 ? StripTimestamp(snapshot.Logs[0]) : "-";
+    }
+
+    private void UpdateDiningConcurrentEatingStatus(DiningPhilosophersSnapshot snapshot)
+    {
+        if (snapshot.StartedAt != _diningSessionStartedAt)
+        {
+            _diningSessionStartedAt = snapshot.StartedAt;
+            _diningMaxConcurrentEating = 0;
+        }
+
+        var currentConcurrentEating = snapshot.Philosophers.Count(item => item.State == DiningPhilosopherState.Eating);
+        if (currentConcurrentEating > _diningMaxConcurrentEating)
+        {
+            _diningMaxConcurrentEating = currentConcurrentEating;
+        }
+
+        DiningConcurrentEatingStatus = $"동시 식사: {currentConcurrentEating}명 (최대 {_diningMaxConcurrentEating}명)";
+    }
+
+    private void SyncDiningPhilosophers(IReadOnlyList<DiningPhilosopherSnapshot> philosophers)
+    {
+        while (DiningPhilosophers.Count < philosophers.Count)
+        {
+            var index = DiningPhilosophers.Count;
+            DiningPhilosophers.Add(new DiningPhilosopherViewModel(index, $"철학자 {index + 1}"));
+        }
+
+        while (DiningPhilosophers.Count > philosophers.Count)
+        {
+            DiningPhilosophers.RemoveAt(DiningPhilosophers.Count - 1);
+        }
+
+        for (var i = 0; i < philosophers.Count; i++)
+        {
+            DiningPhilosophers[i].Update(philosophers[i], GetDiningBackground(philosophers[i].State), GetDiningAccent(philosophers[i].State));
+        }
+    }
+
+    private void SyncDiningForks(IReadOnlyList<DiningForkSnapshot> forks)
+    {
+        while (DiningForks.Count < forks.Count)
+        {
+            var index = DiningForks.Count;
+            DiningForks.Add(new DiningForkViewModel(index, $"포크 {index + 1}"));
+        }
+
+        while (DiningForks.Count > forks.Count)
+        {
+            DiningForks.RemoveAt(DiningForks.Count - 1);
+        }
+
+        for (var i = 0; i < forks.Count; i++)
+        {
+            if (forks[i].IsHeld)
+            {
+                DiningForks[i].SetHeld(forks[i].Holder);
+            }
+            else
+            {
+                DiningForks[i].SetAvailable();
+            }
+        }
+    }
+
+    private void SyncDiningLogs(IReadOnlyList<string> logs)
+    {
+        DiningLogs.Clear();
+        foreach (var log in logs)
+        {
+            DiningLogs.Add(log);
+        }
+    }
+
+    private static string BuildDiningSummary(DiningPhilosophersSnapshot snapshot)
+    {
+        var thinking = snapshot.Philosophers.Count(item => item.State == DiningPhilosopherState.Thinking);
+        var hungry = snapshot.Philosophers.Count(item => item.State == DiningPhilosopherState.Hungry);
+        var eating = snapshot.Philosophers.Count(item => item.State == DiningPhilosopherState.Eating);
+        var meals = snapshot.Philosophers.Sum(item => item.MealCount);
+        return $"생각 {thinking}명, 대기 {hungry}명, 식사 {eating}명, 총 식사 {meals}회";
+    }
+
+    private static Brush GetDiningBackground(DiningPhilosopherState state)
+    {
+        return state switch
+        {
+            DiningPhilosopherState.Thinking => DiningThinkingBackground,
+            DiningPhilosopherState.Hungry => DiningHungryBackground,
+            DiningPhilosopherState.Eating => DiningEatingBackground,
+            _ => DiningIdleBackground,
+        };
+    }
+
+    private static Brush GetDiningAccent(DiningPhilosopherState state)
+    {
+        return state switch
+        {
+            DiningPhilosopherState.Thinking => DiningThinkingAccent,
+            DiningPhilosopherState.Hungry => DiningHungryAccent,
+            DiningPhilosopherState.Eating => DiningEatingAccent,
+            _ => DiningIdleAccent,
+        };
+    }
+
+    private void ApplyPreemptionSnapshot(PreemptionDemoSnapshot snapshot)
+    {
+        _isPreemptionTestRunning = snapshot.IsRunning;
+        PreemptionTestState = snapshot.State;
+        LastPreemptionEvent = snapshot.LastEvent;
+        PreemptionHighLastInterval = snapshot.HighLastInterval;
+        PreemptionLowWorkUnits = snapshot.LowWorkUnits;
+        PreemptionHighRunCount = snapshot.HighRunCount;
+        PreemptionYieldCount = snapshot.YieldCount;
+        PreemptionLowLastThreadId = snapshot.LowLastThreadId;
+        PreemptionHighLastThreadId = snapshot.HighLastThreadId;
+        PreemptionCurrentExecutionThreadId = snapshot.CurrentExecutionThreadId;
+        PreemptionActiveTask = snapshot.ActiveTask;
+        PreemptionHealthLabel = snapshot.HealthLabel;
+        PreemptionHealthDescription = snapshot.HealthDescription;
+        PreemptionStarvationStatus = snapshot.StarvationStatus;
+        PreemptionStarvationForeground = snapshot.IsStarvationWarning
+            ? HealthWarningForeground
+            : snapshot.IsRunning ? HealthGoodForeground : HealthStoppedForeground;
+        PreemptionHealthBadgeBackground = snapshot.HealthLabel == "정상"
+            ? HealthGoodBackground
+            : snapshot.HealthLabel == "주의" ? HealthWarningBackground
+            : snapshot.IsRunning ? HealthMonitoringBackground : HealthStoppedBackground;
+        PreemptionHealthBadgeForeground = snapshot.HealthLabel == "정상"
+            ? HealthGoodForeground
+            : snapshot.HealthLabel == "주의" ? HealthWarningForeground
+            : snapshot.IsRunning ? HealthMonitoringForeground : HealthStoppedForeground;
+        PreemptionFlowHeadline = snapshot.FlowHeadline;
+        PreemptionFlowDetail = snapshot.FlowDetail;
+        PreemptionLowStepBrush = snapshot.LowStep ? FlowActiveBrush : FlowIdleBrush;
+        PreemptionYieldStepBrush = snapshot.YieldStep ? FlowActiveBrush : FlowIdleBrush;
+        PreemptionHighStepBrush = snapshot.HighStep ? FlowActiveBrush : FlowIdleBrush;
+        UpdatePreemptionInspectorHighlight();
+
+        SyncPreemptionLogs(snapshot.Logs);
+        SyncPreemptionYieldTrend(snapshot.YieldTrend);
+
+        PreemptionTrendMaxYield = snapshot.TrendMaxYield;
+        SyncLowWorkerYieldViewModels(snapshot.LowWorkerYields);
+    }
+
+    private void SyncPreemptionLogs(IReadOnlyList<string> logs)
+    {
+        if (PreemptionLogs.Count == logs.Count)
+        {
+            var same = true;
+            for (var i = 0; i < logs.Count; i++)
+            {
+                if (!string.Equals(PreemptionLogs[i], logs[i], StringComparison.Ordinal))
+                {
+                    same = false;
+                    break;
+                }
+            }
+
+            if (same)
+            {
+                return;
+            }
+        }
+
+        PreemptionLogs.Clear();
+        foreach (var log in logs)
+        {
+            PreemptionLogs.Add(log);
+        }
+    }
+
+    private void SyncPreemptionYieldTrend(IReadOnlyList<PreemptionTrendPointSnapshot> points)
+    {
+        if (PreemptionYieldTrend.Count == points.Count)
+        {
+            var same = true;
+            for (var i = 0; i < points.Count; i++)
+            {
+                if (!string.Equals(PreemptionYieldTrend[i].SecondLabel, points[i].SecondLabel, StringComparison.Ordinal)
+                    || PreemptionYieldTrend[i].YieldCount != points[i].YieldCount)
+                {
+                    same = false;
+                    break;
+                }
+            }
+
+            if (same)
+            {
+                return;
+            }
+        }
+
+        PreemptionYieldTrend.Clear();
+        foreach (var point in points)
+        {
+            PreemptionYieldTrend.Add(new PreemptionTrendPointViewModel(point.SecondLabel, point.YieldCount));
+        }
+    }
+
+    private void SyncLowWorkerYieldViewModels(IReadOnlyList<LowWorkerYieldSnapshot> snapshots)
+    {
+        if (PreemptionLowWorkerYields.Count == snapshots.Count)
+        {
+            var same = true;
+            for (var i = 0; i < snapshots.Count; i++)
+            {
+                var viewModel = PreemptionLowWorkerYields[i];
+                var snapshot = snapshots[i];
+                if (!string.Equals(viewModel.Name, snapshot.Name, StringComparison.Ordinal)
+                    || viewModel.YieldCount != snapshot.YieldCount
+                    || !string.Equals(viewModel.LastResumeDelay, snapshot.LastResumeDelay, StringComparison.Ordinal))
+                {
+                    same = false;
+                    break;
+                }
+            }
+
+            if (same)
+            {
+                return;
+            }
+        }
+
+        PreemptionLowWorkerYields.Clear();
+        _lowWorkerYieldViewModels.Clear();
+
+        foreach (var snapshot in snapshots)
+        {
+            var viewModel = new LowWorkerYieldStatsViewModel(snapshot.Name);
+            viewModel.Update(snapshot.YieldCount, snapshot.LastResumeDelay);
+            _lowWorkerYieldViewModels[snapshot.Name] = viewModel;
+            PreemptionLowWorkerYields.Add(viewModel);
+        }
+    }
+
+    private static string StripTimestamp(string log)
+    {
+        var closeIndex = log.IndexOf(']');
+        return closeIndex >= 0 && closeIndex + 2 < log.Length
+            ? log[(closeIndex + 2)..]
+            : log;
+    }
+
     private async Task StartPreemptionTestAsync()
     {
         if (_isPreemptionTestRunning)
@@ -733,663 +1155,44 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             return;
         }
 
-        await StopPreemptionTestAsync().ConfigureAwait(false);
-
+        _preemptionDemo.Start();
         _isPreemptionTestRunning = true;
-        Interlocked.Exchange(ref _preemptionLowWorkUnitsCounter, 0);
-        Interlocked.Exchange(ref _preemptionHighRunCountCounter, 0);
-        Interlocked.Exchange(ref _preemptionYieldCountCounter, 0);
-        Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, 0);
-        Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, 0);
-        Interlocked.Exchange(ref _preemptionNormalRunCountCounter, 0);
-        Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, 0);
-        Interlocked.Exchange(ref _lastLowWorkTick, 0);
-        Interlocked.Exchange(ref _lastYieldTick, 0);
-        Interlocked.Exchange(ref _lastHighRunTick, 0);
-        Interlocked.Exchange(ref _lastNormalRunTick, 0);
-        Interlocked.Exchange(ref _lastHighStartTick, 0);
-        Interlocked.Exchange(ref _preemptionHighLastIntervalTicks, 0);
-        ResetLowWorkerRuntimeStats();
-        _lastTrendSecond = DateTime.MinValue;
-        _lastYieldTotalForTrend = 0;
-        _preemptionSessionStartedAt = DateTimeOffset.UtcNow;
-        _preemptionLastLowProgressAt = _preemptionSessionStartedAt;
-        _preemptionLastHighProgressAt = _preemptionSessionStartedAt;
-        _preemptionLastLowStartedAt = DateTimeOffset.MinValue;
-        _preemptionLastObservedLowRunCount = 0;
-        _preemptionLastObservedHighRunCount = 0;
-        _isPreemptionStarvationDetected = false;
-        ClearPendingPreemptionLogs();
 
         await _dispatcher.InvokeAsync(() =>
         {
-            PreemptionLogs.Clear();
-            PreemptionYieldTrend.Clear();
-            PreemptionTestState = "Running";
-            LastPreemptionEvent = "데모 시작: Low 3개, Normal 1개, High 1개 구성으로 선점 흐름을 관찰합니다.";
-            PreemptionLowWorkUnits = 0;
-            PreemptionHighRunCount = 0;
-            PreemptionYieldCount = 0;
-            PreemptionHighLastInterval = "-";
-            PreemptionLowLastThreadId = 0;
-            PreemptionHighLastThreadId = 0;
-            PreemptionCurrentExecutionThreadId = 0;
-            PreemptionActiveTask = "대기 중";
-            InitializeLowWorkerYieldViewModels();
-            UpdatePreemptionInspectorHighlight();
-            PreemptionTrendMaxYield = 1;
-            SetPreemptionHealth(
-                label: "초기화",
-                description: "데모를 시작했고, 첫 실행 데이터를 수집 중입니다.",
-                background: HealthMonitoringBackground,
-                foreground: HealthMonitoringForeground);
-            PreemptionStarvationStatus = "기아 감지: 초기화";
-            PreemptionStarvationForeground = HealthMonitoringForeground;
-            SetPreemptionFlow(
-                headline: "초기화 중",
-                detail: "첫 실행 이벤트를 기다리는 중입니다.",
-                lowStep: false,
-                yieldStep: false,
-                highStep: false);
+            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
             _preemptionUiTimer.Start();
             RefreshCommandStates();
         });
-
-        var demoScheduler = new SchedulerService(
-            tickInterval: TimeSpan.FromMilliseconds(5),
-            snapshotInterval: TimeSpan.FromMilliseconds(50),
-            // 데모 태스크(특히 Normal/High)가 최소 1회 작업 단위를 완료할 수 있도록
-            // quantum을 너무 짧게 두지 않는다. (4ms에서는 LOW가 굶주릴 수 있음)
-            timeQuantum: TimeSpan.FromMilliseconds(15));
-
-        demoScheduler.SchedulerError += (_, ex) =>
-        {
-            QueuePreemptionLog($"Scheduler error: {ex.Message}");
-        };
-        demoScheduler.SnapshotChanged += OnPreemptionSchedulerSnapshotChanged;
-
-        RegisterLowWorker(demoScheduler, "Low Worker A", TimeSpan.FromMilliseconds(25), 95, 2);
-        RegisterLowWorker(demoScheduler, "Low Worker B", TimeSpan.FromMilliseconds(35), 120, 2);
-        RegisterLowWorker(demoScheduler, "Low Worker C", TimeSpan.FromMilliseconds(45), 150, 1);
-
-        demoScheduler.Register(new ScheduledTask(
-            "Normal Telemetry",
-            Enum_TaskPriority.Normal,
-            TimeSpan.FromMilliseconds(110),
-            Enum_TaskExecutionMode.Periodic,
-            async (_, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, Environment.CurrentManagedThreadId);
-                var count = Interlocked.Increment(ref _preemptionNormalRunCountCounter);
-                Interlocked.Exchange(ref _lastNormalRunTick, DateTime.UtcNow.Ticks);
-                QueuePreemptionLogEvery(
-                    key: "normal-telemetry",
-                    every: 5,
-                    message: $"Normal Telemetry가 누적 {count}회 실행되었습니다.");
-                await Task.Delay(8, cancellationToken).ConfigureAwait(false);
-            },
-            statusProvider: () => "Medium priority telemetry pulse"));
-
-        demoScheduler.Register(new ScheduledTask(
-            "High Priority Urgent",
-            Enum_TaskPriority.Critical,
-            TimeSpan.FromMilliseconds(180),
-            Enum_TaskExecutionMode.Periodic,
-            async (_, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var startedTicks = DateTime.UtcNow.Ticks;
-                var previousStartedTicks = Interlocked.Exchange(ref _lastHighStartTick, startedTicks);
-                if (previousStartedTicks > 0)
-                {
-                    Interlocked.Exchange(ref _preemptionHighLastIntervalTicks, startedTicks - previousStartedTicks);
-                }
-
-                Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, Environment.CurrentManagedThreadId);
-                var count = Interlocked.Increment(ref _preemptionHighRunCountCounter);
-                Interlocked.Exchange(ref _lastHighRunTick, DateTime.UtcNow.Ticks);
-                var intervalText = previousStartedTicks > 0
-                    ? $", 이전 실행 후 {TimeSpan.FromTicks(startedTicks - previousStartedTicks).TotalMilliseconds:N0}ms"
-                    : string.Empty;
-                QueuePreemptionLogEvery(
-                    key: "high-urgent-start",
-                    every: 3,
-                    message: $"High Priority Urgent가 누적 {count}회 시작되었습니다{intervalText}.");
-
-                for (var burst = 1; burst <= 3; burst++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(4, cancellationToken).ConfigureAwait(false);
-                }
-
-                QueuePreemptionLogEvery(
-                    key: "high-urgent-burst",
-                    every: 3,
-                    message: $"High Priority Urgent burst 처리 누적 {count}회 완료");
-            },
-            statusProvider: () => "Critical burst work"));
-
-        _preemptionTestScheduler = demoScheduler;
-        demoScheduler.Start();
-    }
-
-    private void RegisterLowWorker(
-        SchedulerService scheduler,
-        string name,
-        TimeSpan period,
-        int workUnits,
-        int delayMilliseconds)
-    {
-        scheduler.Register(new ScheduledTask(
-            name,
-            Enum_TaskPriority.Low,
-            period,
-            Enum_TaskExecutionMode.Periodic,
-            async (context, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
-                var startUnit = Math.Clamp(Volatile.Read(ref stats.NextWorkUnit), 0, workUnits);
-
-                RecordLowWorkerResume(name);
-                Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, Environment.CurrentManagedThreadId);
-                Interlocked.Exchange(ref _lastLowWorkTick, DateTime.UtcNow.Ticks);
-
-                for (var i = startUnit; i < workUnits; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    if (context.ShouldYield())
-                    {
-                        Interlocked.Exchange(ref stats.NextWorkUnit, i);
-                        context.MarkPreempted();
-                        Interlocked.Increment(ref _preemptionYieldCountCounter);
-                        Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
-                        RecordLowWorkerYield(name);
-                        var totalYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
-                        QueuePreemptionLogEvery(
-                            key: $"yield-{name}",
-                            every: 4,
-                            message: $"{name} 양보 누적 {totalYieldCount}회 (최근 진행률 {i + 1}/{workUnits})");
-                        return;
-                    }
-
-                    Interlocked.Increment(ref _preemptionLowWorkUnitsCounter);
-                    await Task.Delay(delayMilliseconds, cancellationToken).ConfigureAwait(false);
-                    Interlocked.Exchange(ref stats.NextWorkUnit, i + 1);
-                }
-
-                QueuePreemptionLogEvery(
-                    key: $"low-complete-{name}",
-                    every: 2,
-                    message: $"{name}가 low 작업 슬라이스를 누적 완료했습니다. workUnits={workUnits}");
-                Interlocked.Exchange(ref stats.NextWorkUnit, 0);
-            },
-            statusProvider: () =>
-            {
-                var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
-                var nextUnit = Math.Clamp(Volatile.Read(ref stats.NextWorkUnit), 0, workUnits);
-                return $"{nextUnit}/{workUnits} units / {period.TotalMilliseconds:N0}ms period";
-            },
-            overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay));
-    }
-
-    private void ResetLowWorkerRuntimeStats()
-    {
-        _lowWorkerRuntimeStats.Clear();
-        foreach (var name in GetLowWorkerNames())
-        {
-            _lowWorkerRuntimeStats[name] = new LowWorkerRuntimeStats();
-        }
-    }
-
-    private void InitializeLowWorkerYieldViewModels()
-    {
-        _lowWorkerYieldViewModels.Clear();
-        PreemptionLowWorkerYields.Clear();
-
-        foreach (var name in GetLowWorkerNames())
-        {
-            var viewModel = new LowWorkerYieldStatsViewModel(name);
-            _lowWorkerYieldViewModels[name] = viewModel;
-            PreemptionLowWorkerYields.Add(viewModel);
-        }
-    }
-
-    private void RecordLowWorkerYield(string name)
-    {
-        var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
-        Interlocked.Increment(ref stats.YieldCount);
-        Interlocked.Exchange(ref stats.LastYieldUtcTicks, DateTime.UtcNow.Ticks);
-    }
-
-    private void RecordLowWorkerResume(string name)
-    {
-        var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
-        var yieldedAtTicks = Interlocked.Exchange(ref stats.LastYieldUtcTicks, 0);
-        if (yieldedAtTicks <= 0)
-        {
-            return;
-        }
-
-        var resumedAtTicks = DateTime.UtcNow.Ticks;
-        Interlocked.Exchange(ref stats.LastResumeDelayTicks, Math.Max(0, resumedAtTicks - yieldedAtTicks));
-        Interlocked.Exchange(ref stats.LastResumeUtcTicks, resumedAtTicks);
-    }
-
-    private void UpdateLowWorkerYieldStats()
-    {
-        foreach (var name in GetLowWorkerNames())
-        {
-            if (!_lowWorkerYieldViewModels.TryGetValue(name, out var viewModel))
-            {
-                continue;
-            }
-
-            var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
-            viewModel.Update(
-                Volatile.Read(ref stats.YieldCount),
-                Volatile.Read(ref stats.LastResumeDelayTicks));
-        }
-    }
-
-    private void UpdateHighInterval()
-    {
-        var intervalTicks = Volatile.Read(ref _preemptionHighLastIntervalTicks);
-        PreemptionHighLastInterval = intervalTicks <= 0
-            ? "-"
-            : $"{TimeSpan.FromTicks(intervalTicks).TotalMilliseconds:N0} ms";
-    }
-
-    private static IEnumerable<string> GetLowWorkerNames()
-    {
-        yield return "Low Worker A";
-        yield return "Low Worker B";
-        yield return "Low Worker C";
     }
 
     private async Task StopPreemptionTestAsync()
     {
-        var demoScheduler = _preemptionTestScheduler;
-        _preemptionTestScheduler = null;
-
-        if (demoScheduler is not null)
+        var stopped = await _preemptionDemo.StopAsync().ConfigureAwait(false);
+        if (!stopped)
         {
-            try
+            await _dispatcher.InvokeAsync(() =>
             {
-                demoScheduler.SnapshotChanged -= OnPreemptionSchedulerSnapshotChanged;
-                await demoScheduler.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-            }
-            finally
-            {
-                demoScheduler.Dispose();
-            }
-
-            ClearPreemptionActiveTasks();
-        }
-
-        if (_isPreemptionTestRunning)
-        {
-            _isPreemptionTestRunning = false;
-
-            if (_dispatcher.CheckAccess())
-            {
-                _preemptionUiTimer.Stop();
-                DrainPreemptionLogs(force: true);
-                PreemptionTestState = "Stopped";
-                LastPreemptionEvent = "Preemption demo stopped.";
-                PreemptionCurrentExecutionThreadId = 0;
-                PreemptionActiveTask = "중지";
-                UpdatePreemptionInspectorHighlight();
-                SetPreemptionHealth(
-                    label: "중지",
-                    description: "데모가 중지되어 상태 분석을 멈췄습니다.",
-                    background: HealthStoppedBackground,
-                    foreground: HealthStoppedForeground);
-                PreemptionStarvationStatus = "기아 감지: 중지";
-                PreemptionStarvationForeground = HealthStoppedForeground;
-                SetPreemptionFlow(
-                    headline: "중지",
-                    detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
-                    lowStep: false,
-                    yieldStep: false,
-                    highStep: false);
+                ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
                 RefreshCommandStates();
-            }
-            else
-            {
-                await _dispatcher.InvokeAsync(() =>
-                {
-                    _preemptionUiTimer.Stop();
-                    DrainPreemptionLogs(force: true);
-                    PreemptionTestState = "Stopped";
-                    LastPreemptionEvent = "Preemption demo stopped.";
-                    PreemptionCurrentExecutionThreadId = 0;
-                    PreemptionActiveTask = "중지";
-                    UpdatePreemptionInspectorHighlight();
-                    SetPreemptionHealth(
-                        label: "중지",
-                        description: "데모가 중지되어 상태 분석을 멈췄습니다.",
-                        background: HealthStoppedBackground,
-                        foreground: HealthStoppedForeground);
-                    PreemptionStarvationStatus = "기아 감지: 중지";
-                    PreemptionStarvationForeground = HealthStoppedForeground;
-                    SetPreemptionFlow(
-                        headline: "중지",
-                        detail: "데모가 멈춰 선점 흐름 추적도 중지되었습니다.",
-                        lowStep: false,
-                        yieldStep: false,
-                        highStep: false);
-                    RefreshCommandStates();
-                });
-            }
+            });
+            return;
         }
+
+        _isPreemptionTestRunning = false;
+
+        await _dispatcher.InvokeAsync(() =>
+        {
+            _preemptionUiTimer.Stop();
+            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
+            ClearPreemptionActiveTasks();
+            RefreshCommandStates();
+        });
     }
 
     private void OnPreemptionUiTimerTick(object? sender, EventArgs e)
     {
-        DrainPreemptionLogs();
-        ApplyLatestPreemptionSnapshot();
-        PreemptionLowWorkUnits = Volatile.Read(ref _preemptionLowWorkUnitsCounter);
-        PreemptionHighRunCount = Volatile.Read(ref _preemptionHighRunCountCounter);
-        PreemptionYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
-        PreemptionLowLastThreadId = Volatile.Read(ref _preemptionLowLastThreadIdCounter);
-        PreemptionHighLastThreadId = Volatile.Read(ref _preemptionHighLastThreadIdCounter);
-        UpdateLowWorkerYieldStats();
-        UpdateHighInterval();
-        UpdatePreemptionHealthStatus();
-        UpdatePreemptionFlowStatus();
-
-        var nowSecond = DateTime.Now;
-        nowSecond = new DateTime(
-            nowSecond.Year,
-            nowSecond.Month,
-            nowSecond.Day,
-            nowSecond.Hour,
-            nowSecond.Minute,
-            nowSecond.Second,
-            nowSecond.Kind);
-
-        if (nowSecond == _lastTrendSecond)
-        {
-            return;
-        }
-
-        var currentYieldTotal = Volatile.Read(ref _preemptionYieldCountCounter);
-        var deltaYield = Math.Max(0, currentYieldTotal - _lastYieldTotalForTrend);
-        _lastYieldTotalForTrend = currentYieldTotal;
-        _lastTrendSecond = nowSecond;
-
-        PreemptionYieldTrend.Add(new PreemptionTrendPointViewModel(
-            nowSecond.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-            deltaYield));
-
-        while (PreemptionYieldTrend.Count > 10)
-        {
-            PreemptionYieldTrend.RemoveAt(0);
-        }
-
-        PreemptionTrendMaxYield = PreemptionYieldTrend.Count == 0
-            ? 1
-            : PreemptionYieldTrend.Max(item => item.YieldCount);
-    }
-
-    private void AppendPreemptionLog(string message)
-    {
-        var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
-        LastPreemptionEvent = message;
-        PreemptionLogs.Insert(0, line);
-
-        while (PreemptionLogs.Count > 100)
-        {
-            PreemptionLogs.RemoveAt(PreemptionLogs.Count - 1);
-        }
-    }
-
-    private void QueuePreemptionLog(string message)
-    {
-        var pendingCount = Interlocked.Increment(ref _pendingPreemptionLogCount);
-        if (pendingCount > MaxPendingPreemptionLogs)
-        {
-            Interlocked.Decrement(ref _pendingPreemptionLogCount);
-            Interlocked.Increment(ref _suppressedPreemptionLogCount);
-            return;
-        }
-
-        _pendingPreemptionLogs.Enqueue(message);
-    }
-
-    private void QueuePreemptionLogEvery(string key, int every, string message)
-    {
-        if (every <= 1)
-        {
-            QueuePreemptionLog(message);
-            return;
-        }
-
-        var count = _preemptionLogOccurrenceCounts.AddOrUpdate(key, 1, static (_, current) => current + 1);
-        if (count % every == 0)
-        {
-            QueuePreemptionLog(message);
-        }
-    }
-
-    private void ClearPendingPreemptionLogs()
-    {
-        while (_pendingPreemptionLogs.TryDequeue(out _))
-        {
-        }
-
-        Interlocked.Exchange(ref _pendingPreemptionLogCount, 0);
-        Interlocked.Exchange(ref _suppressedPreemptionLogCount, 0);
-        _preemptionLogOccurrenceCounts.Clear();
-        _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
-    }
-
-    private void DrainPreemptionLogs(bool force = false)
-    {
-        var now = DateTimeOffset.UtcNow;
-        if (!force && _lastPreemptionLogFlushAt != DateTimeOffset.MinValue)
-        {
-            var elapsed = now - _lastPreemptionLogFlushAt;
-            if (elapsed < TimeSpan.FromSeconds(1))
-            {
-                return;
-            }
-        }
-
-        _lastPreemptionLogFlushAt = now;
-
-        var drainedCount = 0;
-        string? latestMessage = null;
-        while (_pendingPreemptionLogs.TryDequeue(out var message))
-        {
-            Interlocked.Decrement(ref _pendingPreemptionLogCount);
-            latestMessage = message;
-            drainedCount++;
-        }
-
-        var suppressedCount = Interlocked.Exchange(ref _suppressedPreemptionLogCount, 0);
-
-        if (drainedCount == 0 && suppressedCount == 0)
-        {
-            return;
-        }
-
-        var summary = suppressedCount > 0
-            ? $"1초 요약: 신규 이벤트 {drainedCount}건, 생략 {suppressedCount}건"
-            : $"1초 요약: 신규 이벤트 {drainedCount}건";
-
-        if (!string.IsNullOrWhiteSpace(latestMessage))
-        {
-            summary = $"{summary} / 최근: {latestMessage}";
-        }
-
-        AppendPreemptionLog(summary);
-    }
-
-    private void UpdatePreemptionHealthStatus()
-    {
-        if (!_isPreemptionTestRunning)
-        {
-            PreemptionStarvationStatus = "기아 감지: 중지";
-            PreemptionStarvationForeground = HealthStoppedForeground;
-            SetPreemptionHealth(
-                label: "중지",
-                description: "데모를 시작하면 선점 상태를 분석합니다.",
-                background: HealthStoppedBackground,
-                foreground: HealthStoppedForeground);
-            return;
-        }
-
-        if (_isPreemptionStarvationDetected)
-        {
-            SetPreemptionHealth(
-                label: "주의",
-                description: "상위 우선순위는 진행 중인데 LOW RunCount/LastStartedAt 갱신이 지연됩니다.",
-                background: HealthWarningBackground,
-                foreground: HealthWarningForeground);
-            PreemptionStarvationStatus = "기아 감지: 주의 (LOW 진행 정체)";
-            PreemptionStarvationForeground = HealthWarningForeground;
-            return;
-        }
-
-        PreemptionStarvationStatus = "기아 감지: 정상";
-        PreemptionStarvationForeground = HealthGoodForeground;
-
-        if (PreemptionHighRunCount < 2)
-        {
-            SetPreemptionHealth(
-                label: "초기화",
-                description: "아직 실행 횟수가 적어서 판단을 보류합니다.",
-                background: HealthMonitoringBackground,
-                foreground: HealthMonitoringForeground);
-            return;
-        }
-
-        if (PreemptionYieldCount >= 3)
-        {
-            SetPreemptionHealth(
-                label: "정상",
-                description: "양보가 반복 발생하여 협력형 선점이 잘 작동 중입니다.",
-                background: HealthGoodBackground,
-                foreground: HealthGoodForeground);
-            return;
-        }
-
-        if (PreemptionLowWorkUnits >= 120 && PreemptionYieldCount == 0)
-        {
-            SetPreemptionHealth(
-                label: "주의",
-                description: "낮은 우선순위 작업량만 증가합니다. 양보 호출 지점을 점검하세요.",
-                background: HealthWarningBackground,
-                foreground: HealthWarningForeground);
-            return;
-        }
-
-        SetPreemptionHealth(
-            label: "관찰",
-            description: "실행 데이터가 누적되는 중입니다. 추세를 조금 더 관찰하세요.",
-            background: HealthMonitoringBackground,
-            foreground: HealthMonitoringForeground);
-    }
-
-    private void SetPreemptionHealth(string label, string description, Brush background, Brush foreground)
-    {
-        PreemptionHealthLabel = label;
-        PreemptionHealthDescription = description;
-        PreemptionHealthBadgeBackground = background;
-        PreemptionHealthBadgeForeground = foreground;
-    }
-
-    private void UpdatePreemptionFlowStatus()
-    {
-        if (!_isPreemptionTestRunning)
-        {
-            PreemptionCurrentExecutionThreadId = 0;
-            PreemptionActiveTask = "중지";
-            UpdatePreemptionInspectorHighlight();
-            SetPreemptionFlow(
-                headline: "중지",
-                detail: "데모 시작 후 단계 신호가 켜집니다.",
-                lowStep: false,
-                yieldStep: false,
-                highStep: false);
-            return;
-        }
-
-        var nowTicks = DateTime.UtcNow.Ticks;
-        var lowRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastLowWorkTick), TimeSpan.FromMilliseconds(900));
-        var yieldRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastYieldTick), TimeSpan.FromMilliseconds(900));
-        var normalRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastNormalRunTick), TimeSpan.FromMilliseconds(900));
-        var highRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastHighRunTick), TimeSpan.FromMilliseconds(900));
-
-        if (yieldRecent && highRecent)
-        {
-            PreemptionCurrentExecutionThreadId = PreemptionHighLastThreadId;
-            PreemptionActiveTask = "HIGH Priority Urgent (선점 직후)";
-            UpdatePreemptionInspectorHighlight();
-            SetPreemptionFlow(
-                headline: "선점 성립",
-                detail: "LOW가 양보했고 HIGH가 즉시 선실행되었습니다.",
-                lowStep: true,
-                yieldStep: true,
-                highStep: true);
-            return;
-        }
-
-        if (highRecent)
-        {
-            PreemptionCurrentExecutionThreadId = PreemptionHighLastThreadId;
-            PreemptionActiveTask = "HIGH Priority Urgent";
-            UpdatePreemptionInspectorHighlight();
-            SetPreemptionFlow(
-                headline: "HIGH 우선 실행 구간",
-                detail: "현재 HIGH 태스크가 CPU를 우선 사용 중입니다.",
-                lowStep: false,
-                yieldStep: false,
-                highStep: true);
-            return;
-        }
-
-        if (normalRecent)
-        {
-            PreemptionCurrentExecutionThreadId = Volatile.Read(ref _preemptionNormalLastThreadIdCounter);
-            PreemptionActiveTask = "NORMAL Telemetry";
-            UpdatePreemptionInspectorHighlight();
-            SetPreemptionFlow(
-                headline: "NORMAL 중간 우선순위 실행",
-                detail: "LOW 작업들이 Ready 상태여도 NORMAL Telemetry가 먼저 실행되며 우선순위 차이를 보여줍니다.",
-                lowStep: false,
-                yieldStep: true,
-                highStep: false);
-            return;
-        }
-
-        if (lowRecent)
-        {
-            PreemptionCurrentExecutionThreadId = PreemptionLowLastThreadId;
-            PreemptionActiveTask = "LOW Priority Worker";
-            UpdatePreemptionInspectorHighlight();
-            SetPreemptionFlow(
-                headline: "LOW 작업 진행 중",
-                detail: "LOW가 작업 중이며 HIGH runnable 신호를 대기하고 있습니다.",
-                lowStep: true,
-                yieldStep: false,
-                highStep: false);
-            return;
-        }
-
-    PreemptionCurrentExecutionThreadId = 0;
-        PreemptionActiveTask = "대기 중";
-        UpdatePreemptionInspectorHighlight();
-        SetPreemptionFlow(
-            headline: "다음 주기 대기",
-            detail: "현재는 다음 주기 실행을 기다리는 구간입니다.",
-            lowStep: false,
-            yieldStep: false,
-            highStep: false);
+        ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
     }
 
     private void UpdatePreemptionInspectorHighlight()
@@ -1407,26 +1210,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         PreemptionCurrentInspectorBackground = isRunningState ? InspectorCurrentActiveBackground : InspectorIdleBackground;
         PreemptionCurrentInspectorBorder = isRunningState ? InspectorCurrentActiveBorder : InspectorIdleBorder;
-    }
-
-    private void SetPreemptionFlow(string headline, string detail, bool lowStep, bool yieldStep, bool highStep)
-    {
-        PreemptionFlowHeadline = headline;
-        PreemptionFlowDetail = detail;
-        PreemptionLowStepBrush = lowStep ? FlowActiveBrush : FlowIdleBrush;
-        PreemptionYieldStepBrush = yieldStep ? FlowActiveBrush : FlowIdleBrush;
-        PreemptionHighStepBrush = highStep ? FlowActiveBrush : FlowIdleBrush;
-    }
-
-    private static bool IsRecentTick(long nowTicks, long targetTicks, TimeSpan threshold)
-    {
-        if (targetTicks <= 0)
-        {
-            return false;
-        }
-
-        var elapsedTicks = nowTicks - targetTicks;
-        return elapsedTicks >= 0 && elapsedTicks <= threshold.Ticks;
     }
 
     private void OnSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
@@ -1452,6 +1235,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         {
             _latestPreemptionSnapshot = snapshot;
         }
+
+        _dispatcher.BeginInvoke(ApplyLatestPreemptionSnapshot, DispatcherPriority.Background);
     }
 
     private void ApplyLatestPreemptionSnapshot()
@@ -1469,8 +1254,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             return;
         }
 
-        UpdatePreemptionStarvationSignal(snapshot);
-
         foreach (var task in snapshot.Tasks)
         {
             if (_preemptionTaskViewModels.TryGetValue(task.Name, out var taskViewModel))
@@ -1483,70 +1266,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
 
         SyncActiveTasks(snapshot, _preemptionActiveTaskNames);
-    }
-
-    private void UpdatePreemptionStarvationSignal(SchedulerSnapshot snapshot)
-    {
-        if (!_isPreemptionTestRunning)
-        {
-            _isPreemptionStarvationDetected = false;
-            return;
-        }
-
-        var lowTasks = snapshot.Tasks
-            .Where(task => task.Name.StartsWith("Low Worker", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        if (lowTasks.Length == 0)
-        {
-            _isPreemptionStarvationDetected = false;
-            return;
-        }
-
-        var higherPriorityTasks = snapshot.Tasks
-            .Where(task => task.Priority > Enum_TaskPriority.Low)
-            .ToArray();
-
-        var lowRunCount = lowTasks.Sum(task => task.RunCount);
-        var higherRunCount = higherPriorityTasks.Sum(task => task.RunCount);
-        var latestLowStartedAt = lowTasks
-            .Where(task => task.LastStartedAt.HasValue)
-            .Select(task => task.LastStartedAt!.Value)
-            .DefaultIfEmpty(DateTimeOffset.MinValue)
-            .Max();
-
-        if (lowRunCount > _preemptionLastObservedLowRunCount)
-        {
-            _preemptionLastLowProgressAt = snapshot.CreatedAt;
-            _preemptionLastObservedLowRunCount = lowRunCount;
-        }
-
-        if (higherRunCount > _preemptionLastObservedHighRunCount)
-        {
-            _preemptionLastHighProgressAt = snapshot.CreatedAt;
-            _preemptionLastObservedHighRunCount = higherRunCount;
-        }
-
-        if (latestLowStartedAt != DateTimeOffset.MinValue)
-        {
-            _preemptionLastLowStartedAt = latestLowStartedAt;
-        }
-
-        var now = snapshot.CreatedAt;
-        var lowStallThreshold = TimeSpan.FromSeconds(PreemptionStarvationLowStallSeconds);
-        var highRecentlyProgressed = _preemptionLastHighProgressAt != DateTimeOffset.MinValue
-            && now - _preemptionLastHighProgressAt <= TimeSpan.FromSeconds(1.5);
-        var lowProgressStalled = now - _preemptionLastLowProgressAt >= lowStallThreshold;
-        var lowStartStalled = _preemptionLastLowStartedAt == DateTimeOffset.MinValue
-            || now - _preemptionLastLowStartedAt >= lowStallThreshold;
-        var readyOrRunningHigher = higherPriorityTasks.Any(task => task.State is Enum_TaskState.Ready or Enum_TaskState.Running);
-        var enoughWarmupTime = now - _preemptionSessionStartedAt >= TimeSpan.FromSeconds(2);
-
-        _isPreemptionStarvationDetected = enoughWarmupTime
-            && highRecentlyProgressed
-            && readyOrRunningHigher
-            && lowProgressStalled
-            && lowStartStalled;
     }
 
     private void ApplyLatestSnapshot()
@@ -1564,6 +1283,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         {
             return;
         }
+
+        ApplyLatestSnapshot(snapshot);
+    }
+
+    private void ApplyLatestSnapshot(SchedulerSnapshot snapshot)
+    {
 
         SchedulerState = snapshot.IsRunning ? "Running" : "Stopped";
         LastSnapshotAt = snapshot.CreatedAt.LocalDateTime.ToString("HH:mm:ss.fff");
@@ -1629,11 +1354,26 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _dispatcher.InvokeAsync(RebuildActiveTasks);
     }
 
+    private void ClearDiningActiveTasks()
+    {
+        _diningActiveTaskNames.Clear();
+        _diningTaskViewModels.Clear();
+
+        if (_dispatcher.CheckAccess())
+        {
+            RebuildActiveTasks();
+            return;
+        }
+
+        _dispatcher.InvokeAsync(RebuildActiveTasks);
+    }
+
     private void RebuildActiveTasks()
     {
         ActiveTasks.Clear();
         AddActiveTasks(_mainActiveTaskNames, _taskViewModels);
         AddActiveTasks(_preemptionActiveTaskNames, _preemptionTaskViewModels);
+        AddActiveTasks(_diningActiveTaskNames, _diningTaskViewModels);
     }
 
     private void AddActiveTasks(
@@ -1656,6 +1396,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         RunTestsCommand.RaiseCanExecuteChanged();
         StartPreemptionTestCommand.RaiseCanExecuteChanged();
         StopPreemptionTestCommand.RaiseCanExecuteChanged();
+        StartDiningCommand.RaiseCanExecuteChanged();
+        StopDiningCommand.RaiseCanExecuteChanged();
+        ResetDiningCommand.RaiseCanExecuteChanged();
     }
 
     private void OnPropertyChanged(string propertyName)
@@ -1673,15 +1416,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         public string SecondLabel { get; }
         public int YieldCount { get; }
-    }
-
-    private sealed class LowWorkerRuntimeStats
-    {
-        public int YieldCount;
-        public int NextWorkUnit;
-        public long LastYieldUtcTicks;
-        public long LastResumeDelayTicks;
-        public long LastResumeUtcTicks;
     }
 
     internal sealed class LowWorkerYieldStatsViewModel : INotifyPropertyChanged
@@ -1716,6 +1450,186 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             LastResumeDelay = lastResumeDelayTicks <= 0
                 ? "-"
                 : $"{TimeSpan.FromTicks(lastResumeDelayTicks).TotalMilliseconds:N0} ms";
+        }
+
+        public void Update(int yieldCount, string lastResumeDelay)
+        {
+            YieldCount = yieldCount;
+            LastResumeDelay = lastResumeDelay;
+        }
+
+        private void SetProperty<T>(ref T field, T value, string propertyName)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return;
+            }
+
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    internal sealed class DiningPhilosopherViewModel : INotifyPropertyChanged
+    {
+        private string _state = "대기";
+        private string _detail = "시작 대기";
+        private int _mealCount;
+        private int _waitCount;
+        private double _activityProgress;
+        private string _leftForkState = "왼쪽 포크 없음";
+        private string _rightForkState = "오른쪽 포크 없음";
+        private Brush _cardBackground = DiningIdleBackground;
+        private Brush _accentBrush = DiningIdleAccent;
+
+        public DiningPhilosopherViewModel(int index, string name)
+        {
+            Index = index;
+            Name = name;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public int Index { get; }
+
+        public string Name { get; }
+
+        public string State
+        {
+            get => _state;
+            private set => SetProperty(ref _state, value, nameof(State));
+        }
+
+        public string Detail
+        {
+            get => _detail;
+            private set => SetProperty(ref _detail, value, nameof(Detail));
+        }
+
+        public int MealCount
+        {
+            get => _mealCount;
+            private set => SetProperty(ref _mealCount, value, nameof(MealCount));
+        }
+
+        public int WaitCount
+        {
+            get => _waitCount;
+            private set => SetProperty(ref _waitCount, value, nameof(WaitCount));
+        }
+
+        public double ActivityProgress
+        {
+            get => _activityProgress;
+            private set => SetProperty(ref _activityProgress, value, nameof(ActivityProgress));
+        }
+
+        public string LeftForkState
+        {
+            get => _leftForkState;
+            private set => SetProperty(ref _leftForkState, value, nameof(LeftForkState));
+        }
+
+        public string RightForkState
+        {
+            get => _rightForkState;
+            private set => SetProperty(ref _rightForkState, value, nameof(RightForkState));
+        }
+
+        public Brush CardBackground
+        {
+            get => _cardBackground;
+            private set => SetProperty(ref _cardBackground, value, nameof(CardBackground));
+        }
+
+        public Brush AccentBrush
+        {
+            get => _accentBrush;
+            private set => SetProperty(ref _accentBrush, value, nameof(AccentBrush));
+        }
+
+        public void Update(DiningPhilosopherSnapshot snapshot, Brush background, Brush accent)
+        {
+            State = snapshot.StateText;
+            Detail = snapshot.Detail;
+            MealCount = snapshot.MealCount;
+            WaitCount = snapshot.WaitCount;
+            ActivityProgress = snapshot.ActivityProgress;
+            LeftForkState = snapshot.LeftForkState;
+            RightForkState = snapshot.RightForkState;
+            CardBackground = background;
+            AccentBrush = accent;
+        }
+
+        private void SetProperty<T>(ref T field, T value, string propertyName)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return;
+            }
+
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    internal sealed class DiningForkViewModel : INotifyPropertyChanged
+    {
+        private string _state = "비어 있음";
+        private string _holder = "사용 가능";
+        private Brush _background = DiningForkAvailableBrush;
+        private Brush _accentBrush = DiningEatingAccent;
+
+        public DiningForkViewModel(int index, string name)
+        {
+            Index = index;
+            Name = name;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public int Index { get; }
+
+        public string Name { get; }
+
+        public string State
+        {
+            get => _state;
+            private set => SetProperty(ref _state, value, nameof(State));
+        }
+
+        public string Holder
+        {
+            get => _holder;
+            private set => SetProperty(ref _holder, value, nameof(Holder));
+        }
+
+        public Brush Background
+        {
+            get => _background;
+            private set => SetProperty(ref _background, value, nameof(Background));
+        }
+
+        public Brush AccentBrush
+        {
+            get => _accentBrush;
+            private set => SetProperty(ref _accentBrush, value, nameof(AccentBrush));
+        }
+
+        public void SetHeld(string holder)
+        {
+            State = "사용 중";
+            Holder = holder;
+            Background = DiningForkHeldBrush;
+            AccentBrush = DiningHungryAccent;
+        }
+
+        public void SetAvailable()
+        {
+            State = "비어 있음";
+            Holder = "사용 가능";
+            Background = DiningForkAvailableBrush;
+            AccentBrush = DiningEatingAccent;
         }
 
         private void SetProperty<T>(ref T field, T value, string propertyName)

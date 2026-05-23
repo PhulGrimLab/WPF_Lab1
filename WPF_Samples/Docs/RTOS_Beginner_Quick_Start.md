@@ -16,9 +16,10 @@
 
 1. Wpf.Lib.RTOS/SchedulerService.cs
 2. Wpf.Lib.RTOS/IScheduledTask.cs
-3. WpfSamples/MainWindowViewModel.cs
-4. WpfSamples/MainWindow.xaml
-5. WpfSamples/Samples_RTOS/CounterTask.cs
+3. Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs
+4. WpfSamples/MainWindowViewModel.cs
+5. WpfSamples/MainWindow.xaml
+6. Wpf.Lib.RTOS/Tasks/SampleTasks.cs
 
 ---
 
@@ -31,8 +32,8 @@
 
 ### 1-2. 코드에서 찾을 위치
 
-1. MainWindowViewModel 생성자: 샘플 태스크 등록
-2. Start 버튼 커맨드: 스케줄러 시작
+1. SchedulerMonitorDemo 생성자: 샘플 태스크 등록
+2. Start 버튼 커맨드: SchedulerMonitorDemo 시작
 3. SnapshotChanged 이벤트: 화면 데이터 갱신
 
 ### 1-3. 이해 체크
@@ -147,12 +148,12 @@ var heartbeat = new ScheduledTask(
 
 - 이것은 인터럽트 기반 강제 선점이 아니라 협력형 양보 모델입니다.
 
-### UI 스레드 관련 핵심
+### 표시 계층 스레드 관련 핵심
 
 현재 데모 정책:
 
 1. 선점 판단 대상은 RTOS 태스크(LOW/HIGH)
-2. UI 스레드는 선점 판정 대상에서 제외
+2. 표시 계층 스레드는 선점 판정 대상에서 제외
 3. 화면에서는 현재 실행 TID(주 정보)와 UI TID(참고)를 분리해서 표시
 
 ---

@@ -66,7 +66,11 @@ MyCompany.Rtos
 2. Wpf.Lib.RTOS/SchedulerContext.cs
 3. Wpf.Lib.RTOS/IScheduledTask.cs
 4. Wpf.Lib.RTOS/SchedulerTaskBase.cs
-5. WpfSamples/Tests/RtosTestRunner.cs
+5. Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs
+6. Wpf.Lib.RTOS/Tasks/PreemptionDemo.cs
+7. Wpf.Lib.RTOS/Tasks/DiningPhilosophersDemo.cs
+8. WpfSamples/MainWindowViewModel.cs
+9. WpfSamples/Tests/RtosTestRunner.cs
 
 ---
 
@@ -395,7 +399,7 @@ while (workRemaining)
 
 ---
 
-## 10-2. UI 끊김 방지 원칙 (데모/운영 공통)
+## 10-2. 표시 계층 끊김 방지 원칙 (데모/운영 공통)
 
 선점/모니터링 화면이 무거워지지 않게 하려면 아래를 지키는 것이 중요합니다.
 

@@ -28,10 +28,10 @@ snapshotInterval 100ms
 태스크는 `Register`로 등록합니다.
 
 ```csharp
-_scheduler.Register(new CounterTask());
-_scheduler.Register(new ClockTask());
-_scheduler.Register(new UiRefreshTask());
+var demo = new SchedulerMonitorDemo();
 ```
+
+`SchedulerMonitorDemo`가 내부에서 샘플 태스크 등록과 스케줄러 생명주기를 담당합니다.
 
 등록된 태스크는 내부의 `_tasks` 목록에 들어갑니다.
 
@@ -47,12 +47,12 @@ _runtimeInfos
 
 ## 3. 스케줄러 시작
 
-사용자가 Start 버튼을 누르면 ViewModel이 `_scheduler.Start()`를 호출합니다.
+사용자가 Start 버튼을 누르면 ViewModel이 `_monitorDemo.Start()`를 호출합니다.
 
 ```csharp
 private void StartScheduler()
 {
-    _scheduler.Start();
+    _monitorDemo.Start();
     RefreshCommandStates();
 }
 ```

@@ -351,9 +351,8 @@ primitive를 외우려고 하기보다, 문제를 먼저 분류하면 선택이 
 ### 8-4. UI에서 실제 연결 확인 파일
 
 1. `WpfSamples/MainWindowViewModel.cs`
-2. `WpfSamples/Samples_RTOS/CounterTask.cs`
-3. `WpfSamples/Samples_RTOS/ClockTask.cs`
-4. `WpfSamples/Samples_RTOS/UiRefreshTask.cs`
+2. `Wpf.Lib.RTOS/Tasks/SampleTasks.cs`
+3. `Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs`
 
 ### 8-5. 추천 읽기 루트
 

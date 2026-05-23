@@ -129,7 +129,7 @@ var task = new ScheduledTask(
     });
 ```
 
-현재 샘플에서는 직접 만든 `CounterTask`, `ClockTask`, `UiRefreshTask`를 사용하지만, 간단한 테스트 작업에는 `ScheduledTask`를 사용할 수 있습니다.
+현재 샘플에서는 `Wpf.Lib.RTOS/Tasks/SampleTasks.cs`의 `CounterTask`, `ClockTask`, `UiRefreshTask`를 사용하지만, 간단한 테스트 작업에는 `ScheduledTask`를 사용할 수 있습니다.
 
 생성자에서는 다음 값을 검증합니다.
 
@@ -444,3 +444,19 @@ one-shot timer와 periodic timer를 지원합니다.
 
 이 3개를 함께 보면
 "실행 엔진 -> 상태 가공 -> 화면 표시"가 한 번에 연결됩니다.
+
+## Tasks 폴더(데모 조합) 추가 설명
+
+최신 구조에서는 데모 실행 조합도 라이브러리 `Tasks` 폴더에 있습니다.
+
+1. `Tasks/SchedulerMonitorDemo.cs`
+- RTOS Monitor 데모의 `SchedulerService` 수명주기와 샘플 태스크 등록을 담당
+
+2. `Tasks/PreemptionDemo.cs`
+- 협력형 선점 데모 실행/스냅샷 생성 담당
+
+3. `Tasks/DiningPhilosophersDemo.cs`
+- 철학자 데모 실행/스냅샷 생성 담당
+
+현재 WPF는 위 데모들의 Start/Stop과 SnapshotChanged 구독만 담당하며,
+실행 로직은 라이브러리 안에서 유지됩니다.
