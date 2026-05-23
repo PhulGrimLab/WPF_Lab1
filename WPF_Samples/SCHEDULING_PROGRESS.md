@@ -209,3 +209,997 @@ _scheduler.SnapshotChanged += (_, snapshot) =>
 다음 작업에서는 `Wpf.Lib.Common/Scheduling` 폴더를 만들고, 위 구조를 실제 C# 파일로 구현한다.
 
 그 다음 `WpfSamples/MainWindowViewModel.cs`에서 샘플 태스크 2~3개를 등록해서 작은 RTOS 모니터 화면처럼 표시한다.
+
+## 2026-05-22 Update
+
+`Wpf.Lib.RTOS` 프로젝트를 기준으로 `WpfSamples/Samples_RTOS`에 실제 동작하는 샘플 태스크를 추가했다.
+
+추가된 샘플 태스크:
+
+1. `CounterTask`: 100ms 주기로 카운터 값을 증가시킨다.
+2. `ClockTask`: 1초 주기로 현재 시간을 갱신한다.
+3. `UiRefreshTask`: 250ms 주기로 UI 갱신성 작업을 흉내낸다.
+
+`WpfSamples` 프로그램의 `MainWindowViewModel`에서 `SchedulerService`를 생성하고 위 태스크들을 등록하도록 연결했다.
+
+GUI에서는 Start/Stop 버튼으로 스케줄러를 제어하고, DataGrid를 통해 태스크 이름, 우선순위, 주기, 실행 횟수, 최근 실행 시간, 실행 소요 시간, 다음 실행 예정 시간, 오류 상태를 확인할 수 있다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 Beginner Readability Update
+
+`Wpf.Lib.RTOS` 코드를 C# 초보자가 더 쉽게 읽을 수 있도록 코드/문서를 함께 보완했다.
+
+1. 코드 가독성 정리
+
+   `IScheduledTask.cs`, `SchedulerContext.cs`, `ScheduledTask.cs`, `CommonRTOS.cs`에서 불필요한 using을 제거했다.
+   `CommonRTOS.cs`의 의미 없는 빈 클래스 `CommonRTOS`를 제거하고 enum 정의 전용 파일로 정리했다.
+
+2. 복잡 구간 해설 주석 보강
+
+   `SchedulerService.cs`의 아래 메서드에 단계형 설명 주석을 추가했다.
+
+   - `CopyRunnableTasks`
+   - `ShouldYieldToHigherPriorityTask`
+   - `ScheduleNextRunIfRegistered`
+   - `GetNextRunAfterMissedTicks`
+
+   `RtosEventFlags.cs`의 대기 수명주기(즉시 완료/등록/timeout/cancel/dispose) 흐름을 주석으로 보강했다.
+
+3. 초보자 문서 보강
+
+   `Docs/RTOS_Beginner_Complete_Guide.md`에
+   "초보자가 특히 어려워하는 4개 구간 빠른 해설" 섹션을 추가했다.
+
+   - runnable 후보 선별
+   - 협력형 양보 판단
+   - EventFlags waiter 생명주기
+   - OneShot/Periodic 다음 실행 시각 계산
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 Preemption GUI Clarity Update
+
+사용자 피드백("어떤 태스크가 동작 중인지, 어느 스레드인지 한눈에 보이게")에 맞춰
+선점 데모 탭의 가시성을 강화했다.
+
+1. 선점 데모 실시간 인스펙터 추가
+
+   `MainWindow.xaml`의 선점 데모에 "태스크/스레드 실시간 인스펙터" 패널을 추가했다.
+
+   - LOW Priority Worker 마지막 실행 스레드 ID
+   - HIGH Priority Urgent 마지막 실행 스레드 ID
+   - 현재 동작 태스크(LOW/HIGH/대기)
+   - UI 스레드 ID
+
+2. ViewModel 계측 필드 추가
+
+   `MainWindowViewModel`에 아래 상태를 추가했다.
+
+   - `PreemptionLowLastThreadId`
+   - `PreemptionHighLastThreadId`
+   - `PreemptionActiveTask`
+   - `PreemptionUiThreadId`
+
+   선점 데모 태스크 실행 시 `Environment.CurrentManagedThreadId`를 기록하고,
+   UI 타이머 tick마다 화면으로 반영한다.
+
+3. 로그 메시지 보강
+
+   선점 로그에 태스크 실행 시점의 TID를 포함해
+   화면 카드와 로그를 함께 비교할 수 있게 했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 Preemption Inspector Visual Emphasis
+
+선점 데모 인스펙터 카드가 상태 변화에 따라 색상으로 즉시 구분되도록 개선했다.
+
+1. 동적 카드 강조
+
+   - LOW 동작 중: LOW 카드 녹색 계열 강조
+   - HIGH 동작 중: HIGH 카드 빨강 계열 강조
+   - 실행 중 구간: "현재 동작 태스크" 카드 파랑 계열 강조
+   - 대기/중지: 모든 카드 기본색 복귀
+
+2. ViewModel Brush 속성 추가
+
+   - `PreemptionLowInspectorBackground`, `PreemptionLowInspectorBorder`
+   - `PreemptionHighInspectorBackground`, `PreemptionHighInspectorBorder`
+   - `PreemptionCurrentInspectorBackground`, `PreemptionCurrentInspectorBorder`
+
+   `PreemptionActiveTask` 값(LOW/HIGH/대기/중지)에 따라 `UpdatePreemptionInspectorHighlight()`에서
+   카드 색상을 일관되게 갱신한다.
+
+3. 중지 상태 정합성 개선
+
+   데모 중지 시 `PreemptionActiveTask`를 `중지`로 설정해
+   인스펙터와 흐름 상태가 서로 다른 값을 보여주지 않도록 맞췄다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 UI Thread vs Execution Thread Clarification
+
+선점 데모의 "현재 동작 태스크" 카드가 UI TID를 중심으로 보여 오해를 줄 수 있어,
+실제 실행 스레드와 UI 스레드를 분리 표기하도록 수정했다.
+
+1. 현재 실행 TID 표시 추가
+
+   - `PreemptionCurrentExecutionThreadId`
+   - `PreemptionCurrentExecutionThreadLabel`
+
+   활성 태스크가 HIGH면 HIGH의 마지막 실행 TID,
+   활성 태스크가 LOW면 LOW의 마지막 실행 TID를 보여준다.
+   대기/중지 상태는 `없음`으로 표시한다.
+
+2. 카드 표기 구조 변경
+
+   기존: UI 스레드 TID 강조
+
+   변경:
+   - `현재 실행 TID: ...` (강조)
+   - `UI 스레드 TID(고정): ...` (보조)
+
+   이를 통해 WPF UI 스레드와 RTOS 데모 실행 스레드가 별개임을
+   화면에서 즉시 확인할 수 있다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 Preemption Scope Clarification (UI Excluded)
+
+사용자 피드백에 따라 선점 모델의 범위를 더 명확히 했다.
+
+1. 선점 판단 범위 고정
+
+   선점 데모의 판단 대상은 RTOS 태스크(LOW/HIGH)로 한정하며,
+   WPF UI 스레드는 선점 판정 대상에서 제외한다.
+
+2. 화면 문구 보강
+
+   선점 흐름 패널에 아래 안내를 추가했다.
+
+   - "선점 판단 범위: RTOS 태스크(LOW/HIGH) 전용. UI 스레드는 선점 판정 대상에서 제외됩니다."
+
+3. 현재 동작 카드 보조 정보 정리
+
+   - 주 정보: 현재 실행 TID(실제 RTOS 데모 실행 스레드)
+   - 보조 정보: 참고 UI TID(선점 판단 제외)
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 Beginner Guide Deep Explanation Expansion
+
+요청사항("현재 코드 설명을 C#/RTOS 초보자도 이해할 수 있도록 자세히")에 맞춰
+`Docs/RTOS_Beginner_Complete_Guide.md`를 대폭 보강했다.
+
+추가한 핵심 섹션:
+
+1. `20. 현재 코드 기준 상세 해설`
+   - Start -> RunAsync -> ExecuteTaskAsync -> Snapshot 흐름을 단계별로 설명
+   - CopyRunnableTasks의 2단계 lock 전략 이유 설명
+   - 협력형 선점 판단(ShouldYield)의 실제 코드 의미 설명
+
+2. `21. 선점 데모 코드 상세 설명 (UI 스레드 제외 원칙)`
+   - RTOS 선점 판단 대상에서 UI 스레드를 제외해야 하는 이유 명시
+   - 선점 데모에서 현재 실행 TID/참고 UI TID 분리 표시 의도 설명
+
+3. `22. C# 초보자용 코드 읽기 습관`
+   - 시그니처 우선 읽기, 상태 필드/lock 경계 파악, 실패 경로 확인 등
+   - 동시성 코드 체크리스트 제공
+
+4. `23. 초보자용 미니 실습 3개`
+   - Heartbeat 태스크 추가
+   - OverrunPolicy 비교 실험
+   - EventFlags 기반 HIGH 태스크 깨우기
+
+비고:
+
+- 문서성 변경이라 빌드는 수행하지 않았다.
+
+## 2026-05-23 MessageQueue Dispose Hang Fix + Full Suite Re-Validation
+
+`RtosMessageQueue`의 dispose 경로에서 대기 중인 `WaitAsync`와 `SemaphoreSlim.Dispose()`가 경합할 때
+pending send/receive 테스트가 타임아웃으로 멈출 수 있는 문제를 수정했다.
+
+개선 내용:
+
+1. `RtosMessageQueue.Dispose()` 동작 수정
+   - `_isDisposed = true`, `_queue.Clear()` 후 `_shutdownCts.Cancel()`로 대기 작업을 깨우는 방식으로 정리
+   - 대기 작업이 남아 있는 동안 `_items.Dispose()`, `_spaces.Dispose()`를 즉시 호출하지 않도록 변경
+
+2. CLI 러너 보강
+   - `WpfSamples.Tests.Cli`에 `--tests` 옵션을 추가해 특정 테스트 메서드만 선택 실행 가능하게 개선
+   - 신규 MessageQueue dispose 회귀 테스트를 빠르게 단독 검증할 수 있게 함
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj -- --tests MessageQueuePendingSendCanceledByDisposeAsync,MessageQueuePendingReceiveCanceledByDisposeAsync
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj -- --all
+```
+
+결과:
+
+- 선택 테스트: `2/2 passed`
+- 전체 스위트: `47/47 passed`
+
+## 2026-05-23 Junior Maintenance Guide Added
+
+사용자 요청("주니어 개발자가 코드 구조/흐름을 이해하고 직접 수정 가능한 수준의 설명서")에 맞춰
+실무형 유지보수 가이드를 신규 작성했다.
+
+추가 문서:
+
+1. `Docs/RTOS_Junior_Code_Maintenance_Guide.md`
+
+핵심 구성:
+
+1. 코드베이스 파일 맵(어디를 수정하면 어떤 동작이 바뀌는지)
+2. 권장 읽기 순서(IScheduledTask -> SchedulerTaskBase -> Context -> SchedulerService 핵심 4메서드)
+3. SchedulerService 실행 흐름 상세(Start/Stop, Run loop, runnable 선택, execute, next-run 계산)
+4. Primitive 수정 규칙(dispose 경합, timeout/cancel/dispose 의미 분리, lock 범위 최소화)
+5. 태스크 추가/수정 표준 절차 + 주니어용 체크리스트
+6. 자주 하는 실수와 교정 방법
+7. CLI 검증 명령(--all, --tests, --compare-quantum)
+
+연계 반영:
+
+1. `README.md` 문서 목록에 신규 가이드 링크 추가
+
+비고:
+
+- 문서성 변경이라 별도 빌드는 생략했다.
+
+## 2026-05-23 Junior Hands-on Labs Package Added
+
+사용자 요청("주니어가 RTOS 라이브러리를 보고 다른 프로젝트에서 스케줄러를 구현할 수 있을 정도의 단계별 매뉴얼")에 맞춰,
+실습형 3단계 패키지 문서를 신규 작성했다.
+
+추가 문서:
+
+1. `Docs/RTOS_Junior_HandsOn_Labs.md`
+
+핵심 구성:
+
+1. Lab 1: 최소 스케줄러 구현(Periodic/OneShot/Priority/Start-Stop/Snapshot)
+2. Lab 2: 선점 구현(ShouldYield, timeQuantum 근사 선점, overrun 정책)
+3. Lab 3: 현재 프로젝트 테스트 케이스 적용(스케줄러 + primitive 회귀)
+4. 단계별 DoD(완료 기준)와 디버깅 고정 루틴 포함
+
+연계 반영:
+
+1. `README.md` 문서 목록에 신규 실습 패키지 링크 추가
+
+비고:
+
+- 문서성 변경이라 별도 빌드는 생략했다.
+
+## 2026-05-23 Re-Implementation Manual for Junior Developers
+
+사용자 요청("주니어가 다른 프로젝트에서 별도 RTOS 스케줄러를 직접 구현할 수 있는 수준")에 맞춰,
+구현 절차 중심의 상세 매뉴얼을 신규 작성했다.
+
+추가 문서:
+
+1. `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+
+문서 구성 핵심:
+
+1. C# 환경에서 RTOS를 어떻게 해석해야 하는지(협력형 선점 + quantum 근사) 전제 정의
+2. 필수 아키텍처 컴포넌트(IScheduledTask, Context, Service, Runtime/Snapshot) 정리
+3. 0단계~8단계 구현 로드맵(최초 루프 -> 고도화 -> 선점 -> primitive -> 운영성)
+4. 선점/스케줄링 핵심 메서드 설계 이유와 동작 근거 설명
+5. 처음 구현부터 현재 테스트 케이스 적용까지의 단계별 테스트 확장 전략
+6. 재구현 체크리스트/안티패턴 포함
+
+연계 반영:
+
+1. `README.md` 문서 목록에 신규 매뉴얼 링크 추가
+
+비고:
+
+- 문서성 변경이라 별도 빌드는 생략했다.
+
+## 2026-05-22 Quick Start Practice Expansion
+
+사용자 요청("초보자가 코드와 설명을 보고 바로 이해")에 맞춰
+`Docs/RTOS_Beginner_Quick_Start.md`를 실습 중심으로 재구성했다.
+
+개선 내용:
+
+1. 단계형 학습 구조 강화
+   - 0~30분 구간별 목표/확인 포인트를 명확히 분리
+   - 각 단계마다 "무엇을 보면 되는지"를 파일/메서드 중심으로 제시
+
+2. 코드 예시 추가
+   - ScheduledTask 생성 최소 예시(Heartbeat)를 삽입해
+     초보자가 바로 따라해볼 수 있게 구성
+
+3. 선점 시뮬레이터 최신 정책 반영
+   - 협력형 선점(ShouldYield) 설명 보강
+   - UI 스레드 제외 원칙(RTOS 태스크 간 선점 판정) 명시
+
+4. 실습/검증 중심 섹션 추가
+   - 미니 실습 A/B/C(태스크 추가, 오버런 정책 비교, 양보 확인)
+   - 실습 후 확인할 관찰 지표(RunCount, TID, 로그 등) 제공
+
+5. FAQ 확장
+   - 기존 3개에서 5개로 확대
+   - StopAsync 지연, Start/Done TID 차이 등 실제 질문 빈도 높은 항목 반영
+
+비고:
+
+- 문서성 변경이라 빌드는 수행하지 않았다.
+
+## 2026-05-22 Test Guide Practice Expansion
+
+`Docs/RTOS_Test_Guide.md`를 초보자 실습형으로 재작성하고,
+현재 `RtosTestRunner.RunAllAsync()`의 실제 테스트 목록과 맞춰 정리했다.
+
+개선 내용:
+
+1. 실행 안내 단순화
+   - UI에서 테스트 실행하는 단계와 결과 컬럼 해석을 명확히 정리
+
+2. 최신 테스트 목록 동기화
+   - Semaphore/MessageQueue/EventFlags/Mutex/SoftwareTimer/TickCounter/Scheduler
+   - Scheduler 협력형 선점/오버런/스냅샷/오류 내성 항목까지 반영
+
+3. 초보자 디버깅 루틴 추가
+   - FAIL 발생 시 Message -> 테스트 메서드 -> 대상 클래스 순으로 추적
+   - timeout/cancellation/dispose 분리 점검 체크리스트 포함
+
+4. 테스트 추가 가이드 보강
+   - 메서드 작성/배열 등록/네이밍 패턴 제시
+
+5. 선점 테스트 해석 주의사항 추가
+   - 협력형 선점 모델(ShouldYield) 설명
+   - UI 스레드 선점 판정 제외 원칙 명시
+
+비고:
+
+- 문서성 변경이라 빌드는 수행하지 않았다.
+
+## 2026-05-22 Docs Full Refresh (Remaining Documents)
+
+사용자 요청("남은 문서 전체 개선")에 따라, Docs 폴더의 남은 문서를
+초보자 관점 + 최신 코드 정책 기준으로 일괄 보강했다.
+
+대상 문서:
+
+1. `Docs/RTOS_Overview.md`
+2. `Docs/RTOS_File_Guide.md`
+3. `Docs/Samples_RTOS_Guide.md`
+4. `Docs/SchedulerService_Flow.md`
+5. `Docs/RTOS_Primitives_Deep_Dive.md`
+6. `Docs/RTOS_Simulator_Maturity_Checklist.md`
+7. `Docs/RTOS_Real_vs_Simulator_Gap.md`
+
+핵심 개선 축:
+
+1. 용어 통일
+   - 협력형 선점(ShouldYield) 정의 통일
+   - UI 스레드 선점 판정 제외 원칙 명시
+
+2. 초보자 학습 동선 강화
+   - 파일/함수 우선 읽기 순서 제시
+   - 개념 -> 코드 -> 테스트 -> UI 관찰 흐름으로 연결
+
+3. 최신 기능 반영
+   - 선점 데모 인스펙터(TID/활성 태스크) 해석 추가
+   - StopAsync(timeout), 자기중지 보호 등 최신 동작 설명 보강
+
+4. 실전 적용 가이드 강화
+   - 시뮬레이터 성숙도 판정 기준 보강
+   - 실제 RTOS와의 경계(가능/제한)를 FAQ 형태로 명확화
+
+비고:
+
+- 문서성 변경이라 빌드는 수행하지 않았다.
+
+## 2026-05-22 RTOS Runtime Safety Hardening
+
+RTOS 라이브러리 전체 점검에서 발견된 누수/경합 가능 지점을 수정하고
+회귀 테스트를 추가했다.
+
+1. `RtosEventFlags` waiter 잔류 방지
+
+문제:
+
+- `WaitAsync`에서 waiter를 `_waiters`에 먼저 등록한 뒤
+   `StartTimeout` 등록 과정에서 예외가 나면 orphan waiter가 남을 수 있었다.
+
+수정:
+
+- `WaitAsync`에서 `request.StartTimeout(...)`를 `try/catch`로 감싸고
+   실패 시 `RemoveWaiter(request)`로 목록에서 즉시 제거.
+- `WaitRequest.StartTimeout` 내부도 `try/catch`로 감싸
+   부분 등록 상태에서 `Cleanup()` 후 예외 재던지기 처리.
+
+2. `RtosSoftwareTimer` stop/start 경합 완화
+
+문제:
+
+- `StopAsync`가 `_runTask`를 먼저 null로 만들던 구간에서
+   `Start()`가 들어오면 기존 run과 신규 run이 겹칠 가능성이 있었다.
+
+수정:
+
+- `StopAsync`에서 즉시 `_runTask`를 null로 비우지 않고,
+   기존 run 종료(await) 후 참조 일치 시 null 처리.
+- `Dispose` 경로도 동일 원칙으로 변경해
+   run task 종료 시점에 안전하게 `_runTask`를 정리.
+
+3. 테스트 추가
+
+`WpfSamples/Tests/RtosTestRunner.cs`에 아래 테스트 추가:
+
+- `EventFlags registration failure does not leak waiter`
+- `SoftwareTimer stop-start race avoids overlapping runs`
+
+4. 검증
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+결과: 성공 빌드.
+
+## 2026-05-22 Docs Beginner Improvement Update
+
+Docs 폴더 문서를 다시 점검해, C# 초보자가 코드와 문서를 연결해 읽기 쉽도록 구조를 보강했다.
+
+1. 빠른 시작 문서 추가
+
+   새 문서 `Docs/RTOS_Beginner_Quick_Start.md`를 추가했다.
+   30분 기준으로 "어떤 파일을 어떤 순서로 보면 되는지"를 단계별로 정리했다.
+
+2. 문서 허브 연결 강화
+
+   `Docs/RTOS_Overview.md`에 빠른 시작 링크와 초보자 추천 읽기 순서를 추가했다.
+   `Docs/RTOS_Beginner_Complete_Guide.md` 초반에 빠른 시작 문서 안내를 추가했다.
+
+3. 최신 코드 반영 보강
+
+   `Docs/RTOS_File_Guide.md`에 최신 코드 기준 보완 섹션을 추가했다.
+
+   - IScheduledTask의 OverrunPolicy, SetEnabled
+   - SchedulerContext.ShouldYield
+   - ScheduledTaskSnapshot 확장 통계 필드
+   - StopAsync(timeout) 동작
+
+4. 테스트 문서 가독성 보강
+
+   `Docs/RTOS_Test_Guide.md`에 기능별 테스트 매핑 섹션을 추가했다.
+   기능(스케줄러/오버런/primitive) 기준으로 어떤 테스트를 먼저 읽을지 안내했다.
+
+## 2026-05-22 App Exit Fix Update
+
+윈도우 창의 X 버튼으로 닫을 때 창만 사라지고 프로세스가 남는 현상을 보완했다.
+
+원인 후보:
+
+1. `MainWindowViewModel.Dispose()`에서 `StopPreemptionTestAsync().GetAwaiter().GetResult()`로 비동기 정지를 UI 스레드에서 동기 대기해 교착 가능성 존재
+2. 종료 경로에서 앱 종료 모드/강제 종료 보장이 약함
+
+수정 내용:
+
+1. `MainWindowViewModel`에 `IAsyncDisposable` 구현 추가
+2. `Dispose()`는 UI 스레드에서 동기 대기하지 않고 `DisposeAsync()`를 비동기 호출
+3. `MainWindow.OnClosed`를 `async void`로 변경하고 `await _viewModel.DisposeAsync()` 처리
+4. `App.xaml`에 `ShutdownMode="OnMainWindowClose"` 명시
+5. `OnClosed` 종료 후 `Application.Current.Shutdown()` 호출로 종료 보강
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.csproj
+```
+
+## 2026-05-22 RTOS Simulator Features and Tests Update
+
+실제 임베디드 RTOS 개념에 조금 더 가까워지도록 `Wpf.Lib.RTOS`에 시뮬레이터 기능을 추가하고, `WpfSamples`에서 UI로 실행할 수 있는 단위 테스트를 추가했다.
+
+추가 기능:
+
+1. 태스크 상태
+
+   `Enum_TaskState`를 추가했다.
+   상태 값은 `Ready`, `Running`, `Blocked`, `Suspended`이다.
+   `ScheduledTaskSnapshot`에 `State` 필드를 추가했고, WPF DataGrid에도 `State` 컬럼을 추가했다.
+
+2. `RtosSemaphore`
+
+   RTOS semaphore 개념을 흉내낸 클래스이다.
+   `WaitAsync`와 `Release`를 통해 제한된 자원 접근을 테스트할 수 있다.
+
+3. `RtosMessageQueue<T>`
+
+   태스크 사이 메시지 전달을 흉내낸 bounded queue이다.
+   `SendAsync`와 `ReceiveAsync`를 제공한다.
+
+4. `RtosTickCounter`
+
+   RTOS tick 개념을 단순화한 클래스이다.
+   기준 시각과 tick interval을 기준으로 현재 tick을 계산한다.
+
+테스트 코드:
+
+```text
+WpfSamples/Tests/RtosAssert.cs
+WpfSamples/Tests/RtosTestResult.cs
+WpfSamples/Tests/RtosTestRunner.cs
+```
+
+현재 테스트 항목:
+
+1. Semaphore wait/release
+2. MessageQueue send/receive
+3. TickCounter converts time to ticks
+4. Scheduler executes periodic task
+5. Scheduler snapshot contains task state
+
+WPF UI 변경:
+
+1. 기존 RTOS 상태 화면을 `RTOS Monitor` 탭으로 구성했다.
+2. 테스트 실행 화면을 `RTOS Tests` 탭으로 추가했다.
+3. `Run Tests` 버튼으로 테스트를 실행하고 결과를 DataGrid에서 확인할 수 있게 했다.
+
+문서 추가:
+
+```text
+Docs/RTOS_Test_Guide.md
+```
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 Documentation Update
+
+`Wpf.Lib.RTOS` 라이브러리와 `WpfSamples/Samples_RTOS` 샘플 태스크를 C# 초보자도 이해할 수 있도록 `Docs` 폴더에 설명서를 추가했다.
+
+추가 문서:
+
+1. `Docs/RTOS_Overview.md`
+
+   RTOS 스타일 스케줄러의 전체 개념, 핵심 용어, 전체 실행 흐름, WPF에서 UI 스레드와 스케줄러를 분리해야 하는 이유를 설명한다.
+
+2. `Docs/RTOS_File_Guide.md`
+
+   `Wpf.Lib.RTOS` 프로젝트의 파일별 역할을 설명한다.
+   `IScheduledTask`, `SchedulerTaskBase`, `ScheduledTask`, `SchedulerService`, snapshot 관련 record, runtime info 구조를 파일별로 정리했다.
+
+3. `Docs/SchedulerService_Flow.md`
+
+   `SchedulerService` 내부 동작 흐름을 단계별로 설명한다.
+   태스크 등록, 시작, 실행 후보 선택, 태스크 실행, 다음 실행 시각 계산, snapshot 발행, 정지, dispose 흐름을 다룬다.
+
+4. `Docs/Samples_RTOS_Guide.md`
+
+   `CounterTask`, `ClockTask`, `UiRefreshTask`가 `IScheduledTask`를 통해 RTOS 라이브러리와 어떻게 연결되는지 설명한다.
+   `MainWindowViewModel`, `SnapshotChanged`, `Dispatcher`, `ScheduledTaskStatusViewModel`, `DataGrid`까지 이어지는 GUI 갱신 흐름도 함께 정리했다.
+
+## 2026-05-22 RTOS Library Validation Update
+
+`Wpf.Lib.RTOS` 코드 리뷰에서 확인한 추가 개선 항목 중 1번부터 3번까지 반영했다.
+
+1. `StopAsync(TimeSpan timeout)` 사전 검증
+
+   기존에는 timeout 값 검증이 `WaitForStopAsync` 내부에서 수행되어, 잘못된 timeout이 들어오면 스케줄러 상태가 `Stopping`으로 바뀐 뒤 예외가 발생할 수 있었다.
+   `StopAsync` 시작 시점에 `ValidateTimeout`을 호출하도록 변경해 상태 변경 전에 잘못된 인자를 차단했다.
+
+2. `SchedulerService` interval 검증
+
+   `tickInterval`과 `snapshotInterval`이 0 이하인 경우 예외를 발생시키도록 생성자 검증을 추가했다.
+   잘못된 interval 값으로 busy loop나 과도한 snapshot 발생이 생기는 것을 방지한다.
+
+3. `task.Status` 예외 보호
+
+   스냅샷 생성 중 외부 태스크의 `Status` 접근에서 예외가 발생해도 스케줄러 루프가 종료되지 않도록 `GetTaskStatus`를 추가했다.
+   예외가 발생하면 `"Status error: ..."` 문자열을 snapshot에 담는다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 RTOS Library Cleanup Update
+
+`Wpf.Lib.RTOS`의 스케줄러 종료/정리 경로와 실행 후보 처리 방식을 추가로 개선했다.
+
+1. `Dispose()` 리소스 정리 보강
+
+   기존 `Dispose()`는 `CancellationTokenSource.Cancel()`만 호출하고 dispose하지 않았다.
+   `cts?.Dispose()`를 추가해 스케줄러 인스턴스를 반복 생성/폐기할 때 리소스가 남지 않도록 했다.
+
+2. `RunAsync` 종료 경로 정리
+
+   `RunAsync`가 정상 취소, 내부 예외, 기타 종료 경로로 끝나더라도 `finally`에서 `CleanupStoppedScheduler`를 호출하도록 변경했다.
+   스케줄러 루프가 예외로 종료된 뒤에도 상태가 `Running` 또는 `Stopping`에 남는 문제를 줄였다.
+
+3. `StopAsync(timeout)` timeout 이후 정리 보장
+
+   `StopAsync(TimeSpan timeout)`이 제한 시간 안에 종료하지 못해 `false`를 반환하더라도, 실행 루프가 나중에 끝나면 cleanup이 호출되도록 continuation을 추가했다.
+   timeout 대기용 `Task.Delay`는 `CancellationTokenSource`로 취소할 수 있게 변경해 불필요한 타이머 유지 시간을 줄였다.
+
+4. 실행 후보 선별 lock 범위 축소
+
+   `_syncRoot` lock 안에서는 등록된 태스크 목록 복사만 수행하고, `task.IsEnabled`, `task.NextRunAt` 같은 외부 태스크 속성 평가는 lock 밖에서 수행하도록 변경했다.
+   사용자 태스크 구현의 속성 접근이 느리거나 내부 lock을 사용하는 경우에도 스케줄러의 등록/해제/스냅샷 작업이 오래 막히지 않도록 했다.
+
+5. 제거된 태스크 실행 방지
+
+   실행 후보가 `_executionBuffer`에 복사된 뒤 `Unregister` 또는 `Clear`가 호출될 수 있으므로, 실제 실행 직전에 등록 여부를 다시 확인하도록 했다.
+   제거된 태스크가 현재 tick에서 한 번 더 실행되는 가능성을 줄였다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 RTOS Library State Update
+
+이전 코드 리뷰에서 확인한 추가 개선 항목 중 1번부터 4번까지 반영했다.
+5번 enum 파일 분리와 6번 using 정리는 현 상태를 유지하기로 했다.
+
+1. Start/Stop/Dispose 상태 전이 보호
+
+   `SchedulerService` 내부에 `SchedulerRunState` 상태를 추가했다.
+   상태 값은 `Stopped`, `Running`, `Stopping`, `Disposed`로 구분한다.
+   `Start`, `StopAsync`, `Dispose`, `DisposeAsync`, `IsRunning`에서 `_stateSyncRoot` lock을 통해 상태 접근을 보호하도록 변경했다.
+   버튼 연타나 외부 코드의 동시 호출로 스케줄러 상태가 꼬일 가능성을 줄였다.
+
+2. `ScheduledTask` 생성자 검증 추가
+
+   `ScheduledTask`가 새로 추가한 `SchedulerTaskBase`를 상속하도록 변경했다.
+   태스크 이름이 비어 있거나, 주기가 0 이하인 경우 예외를 발생시킨다.
+   `executeAsync` delegate가 null인 경우 `ArgumentNullException`을 발생시킨다.
+
+3. 실행 후보 리스트 할당 감소
+
+   기존에는 실행 후보를 만들 때 내부 버퍼를 정렬한 뒤 `ToArray()`로 매 tick마다 배열을 새로 만들었다.
+   `_executionBuffer`를 추가해 스케줄러 루프 안에서 실행 후보 목록을 재사용하도록 변경했다.
+   태스크 실행 tick마다 발생하던 작은 배열 할당을 줄였다.
+
+4. `SchedulerTaskBase` 추가
+
+   `IScheduledTask` 구현을 표준화하기 위한 추상 기본 클래스 `SchedulerTaskBase`를 추가했다.
+   `Name`, `Priority`, `Period`, `Mode`, `NextRunAt`, `IsEnabled`, `Status` 기본 구현을 제공한다.
+   `NextRunAt`과 `IsEnabled` 접근은 내부 lock으로 보호한다.
+   `SetEnabled(bool isEnabled)`를 제공해서 태스크 활성 상태를 안전하게 변경할 수 있게 했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 RTOS Library Stability Update
+
+`Wpf.Lib.RTOS` 라이브러리의 장시간 실행 안정성, 메모리 유지 가능성, 성능 병목 가능성을 순서대로 개선했다.
+
+1. 이벤트 예외 보호
+
+   `SchedulerService.SnapshotChanged` 이벤트를 직접 호출하지 않고 구독자별로 예외를 보호하도록 변경했다.
+   외부 구독자에서 예외가 발생해도 스케줄러 루프가 종료되지 않도록 했다.
+   추가로 `SchedulerError` 이벤트를 제공해서 태스크 실행 오류나 이벤트 구독자 오류를 외부에서 받을 수 있게 했다.
+
+2. `StopAsync` timeout 지원
+
+   기존 `StopAsync()`는 실행 중인 태스크가 `CancellationToken`을 무시하면 무한 대기할 수 있었다.
+   `StopAsync(TimeSpan timeout)` 오버로드를 추가하고, 제한 시간 안에 멈추지 않으면 `false`를 반환하도록 변경했다.
+   기존 호출부 호환을 위해 `StopAsync()`는 기존처럼 무제한 대기 동작을 유지한다.
+
+3. 태스크 제거 API 추가
+
+   동적으로 태스크를 추가하는 구조에서 `_tasks`, `_runtimeInfos`가 계속 참조를 유지하지 않도록 `Unregister(IScheduledTask task)`와 `Clear()`를 추가했다.
+   샘플 화면이나 커스텀 컨트롤을 전환하면서 태스크를 제거할 수 있는 기반을 마련했다.
+
+4. tick 루프 성능 개선
+
+   매 10ms tick마다 LINQ `Where`, `OrderByDescending`, `ThenBy`, `ToList`를 수행하던 부분을 제거했다.
+   내부 `_runnableBuffer`를 재사용하고 `List.Sort` 기반 비교 함수로 실행 후보를 정렬하도록 변경했다.
+   실행 후보 반환 시에는 스케줄러 내부 버퍼 보호를 위해 배열 복사본을 반환한다.
+
+5. 런타임 정보 갱신 정책 정리
+
+   `TaskRuntimeInfo`의 setter를 외부에서 직접 수정하지 못하게 캡슐화했다.
+   `MarkStarted`, `MarkCompleted`, `MarkFailed`, `ToSnapshot` 메서드를 추가했다.
+   런타임 정보 갱신과 스냅샷 복사는 `_syncRoot` lock 안에서 수행하고, `task.Status` 같은 외부 태스크 속성 접근은 lock 밖에서 처리하도록 변경했다.
+
+6. Dispose 개선
+
+   `SchedulerService`에 `IAsyncDisposable`을 추가했다.
+   비동기 정리가 필요한 경우 `DisposeAsync()`에서 먼저 정지 시도를 수행한 뒤 리소스를 정리할 수 있게 했다.
+   `Dispose()`에서는 이벤트 참조를 해제해 구독자 참조가 오래 유지되는 것을 줄였다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+
+## 2026-05-22 Memory Update
+
+GUI 실행 중 메모리가 계속 증가하는 현상을 확인했다.
+
+주요 원인:
+
+1. `SchedulerService`가 10ms마다 `SnapshotChanged` 이벤트를 발생시켰다.
+2. `MainWindowViewModel`이 매 이벤트마다 `Dispatcher.BeginInvoke`를 호출했다.
+3. UI 처리 속도보다 이벤트가 빠르면 Dispatcher 큐에 갱신 작업이 누적될 수 있었다.
+4. 매 갱신마다 `Tasks.Clear()` 후 `ScheduledTaskStatusViewModel`을 새로 생성해서 DataGrid 항목 churn이 컸다.
+
+수정 내용:
+
+1. `SchedulerService`에 표시용 `snapshotInterval`을 추가하고 기본값을 100ms로 제한했다.
+2. `MainWindowViewModel`에서 UI 갱신 요청이 이미 대기 중이면 최신 스냅샷만 보관하도록 변경했다.
+3. DataGrid 행 ViewModel을 매번 새로 만들지 않고 기존 `ScheduledTaskStatusViewModel`을 업데이트하도록 변경했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-22 RTOS Library Robustness Update
+
+`Wpf.Lib.RTOS` 코드를 다시 검토하면서 커스텀 Task 구현체가 잘못된 값을 던지는 경우와 RTOS 동기화 객체의 Dispose 이후 접근을 보강했다.
+
+1. 스케줄러 스냅샷 보호
+
+   `SchedulerService`가 스냅샷을 만들 때 `Status`뿐 아니라 `Name`, `Priority`, `Period`, `Mode`, `NextRunAt`, `IsEnabled` 접근도 안전하게 처리하도록 변경했다.
+   커스텀 `IScheduledTask` 구현이 속성 getter에서 예외를 던져도 스케줄러 루프와 UI 스냅샷 갱신이 중단되지 않도록 기본값을 사용한다.
+
+2. 실행 후보 정렬/판단 보호
+
+   실행 후보를 고르고 정렬할 때도 Task 속성 접근을 보호했다.
+   잘못된 Task 구현체 하나가 전체 스케줄러 tick 루프를 중단시키는 위험을 줄였다.
+
+3. `RtosSemaphore` 상태 일관성 개선
+
+   별도 `_currentCount`를 직접 관리하던 구조를 제거하고 `SemaphoreSlim.CurrentCount`를 기준으로 값을 제공하도록 변경했다.
+   `Release()` 도중 예외가 발생했을 때 내부 카운트와 실제 semaphore 카운트가 어긋날 수 있는 가능성을 제거했다.
+   Dispose 이후 `CurrentCount`, `WaitAsync`, `Release` 접근은 `ObjectDisposedException`으로 명확히 차단한다.
+
+4. `RtosMessageQueue` Dispose 보호
+
+   Dispose 상태 플래그를 추가하고 `Count`, `SendAsync`, `ReceiveAsync`에서 Dispose 이후 접근을 차단했다.
+   큐 변경과 semaphore release를 같은 lock 구간에서 처리해 Dispose와의 경합 중 중간 상태가 노출될 가능성을 줄였다.
+
+5. 테스트 추가
+
+   WpfSamples의 RTOS Tests에서 다음 항목을 추가했다.
+
+   - `Semaphore throws after dispose`
+   - `MessageQueue throws after dispose`
+   - `Scheduler snapshot survives faulty task properties`
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-22 RTOS Behavior Test Expansion Update
+
+실제 RTOS와 유사한 동작을 더 명확히 확인하기 위해 테스트 항목을 보강하고, 함께 발견한 작은 방어 코드를 수정했다.
+
+1. RTOS 동작 관련 테스트 추가
+
+   WpfSamples의 RTOS Tests에서 다음 항목을 추가했다.
+
+   - `Scheduler runs higher priority task first`
+   - `Scheduler executes one-shot task once`
+   - `Scheduler stop timeout returns false`
+   - `Scheduler overrun task does not overlap`
+
+   현재 스케줄러가 선점형이 아니라 cooperative 방식이라는 점을 테스트로 명확히 남겼다.
+   특히 overrun 테스트는 긴 실행 시간을 가진 태스크가 중첩 실행되지 않는지 확인한다.
+
+2. RTOS primitive 테스트 추가
+
+   다음 항목을 추가했다.
+
+   - `Semaphore rejects over-release`
+   - `MessageQueue receive timeout`
+   - `TickCounter rejects overflow tick`
+
+3. 코드 보완
+
+   `RtosMessageQueue<T>`의 dispose 상태 확인을 lock 기반으로 정리했다.
+   `RtosTickCounter.GetTimeForTick`은 tick 값이 너무 커서 `TimeSpan` 또는 `DateTimeOffset` 범위를 넘는 경우 `ArgumentOutOfRangeException`으로 명확히 차단하도록 변경했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-22 RTOS Overrun and Reliability Update
+
+실제 RTOS 동작과 더 비슷하게 비교할 수 있도록 overrun 정책을 추가하고, 스케줄러/primitive 테스트를 보강했다.
+
+1. Overrun 정책 추가
+
+   `Enum_TaskOverrunPolicy`를 추가했다.
+
+   - `FixedRate`: 기존 동작과 동일하게 원래 예정 시각 기준으로 다음 실행 시각을 계산한다.
+   - `FixedDelay`: 태스크 완료 시각 기준으로 다음 실행 시각을 계산한다.
+   - `SkipMissedTicks`: 태스크가 오래 걸려 놓친 주기를 건너뛰고 완료 시각 이후의 다음 주기로 이동한다.
+
+   `IScheduledTask`에 `OverrunPolicy` 속성을 추가했고, `SchedulerTaskBase`와 `ScheduledTask`는 기본값을 `FixedRate`로 제공한다.
+   기존 샘플 태스크인 `CounterTask`, `ClockTask`, `UiRefreshTask`도 `FixedRate` 정책을 명시했다.
+
+2. Dispose 안정성 보강
+
+   `SchedulerService.Dispose()`에서 실행 루프가 아직 살아 있을 때 `CancellationTokenSource`를 즉시 dispose하지 않고, 실행 루프가 끝난 뒤 dispose하도록 continuation을 연결했다.
+   장시간 실행 중인 태스크가 있을 때 정리 타이밍이 꼬일 가능성을 줄였다.
+
+3. 테스트 추가
+
+   WpfSamples의 RTOS Tests에 다음 항목을 추가했다.
+
+   - `Semaphore wait observes cancellation`
+   - `MessageQueue preserves FIFO order`
+   - `Scheduler stop honors cancellation`
+   - `Scheduler unregister prevents future execution`
+   - `Scheduler clear removes all tasks`
+   - `Scheduler reports task errors`
+   - `Scheduler survives snapshot handler errors`
+   - `Scheduler fixed-delay overrun waits after completion`
+   - `Scheduler skip-missed overrun advances schedule`
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-22 RTOS Simulation Primitives Update
+
+Windows C# WPF 환경에서 실제 RTOS처럼 완전히 동작할 수는 없지만, 학습/시각화/검증용으로 흉내낼 수 있는 RTOS 기능을 추가했다.
+
+1. Event Flags
+
+   `RtosEventFlags`를 추가했다.
+   `WaitAnyAsync`, `WaitAllAsync`, `Set`, `Clear`를 제공한다.
+   여러 bit 이벤트 중 하나 또는 전체가 설정될 때까지 대기하는 RTOS event flag 동작을 흉내낸다.
+
+2. Mutex와 priority inheritance 흉내
+
+   `RtosMutex`를 추가했다.
+   owner를 추적하고, 높은 우선순위 대기자가 있으면 `EffectiveOwnerPriority`로 소유자의 임시 상승 우선순위를 확인할 수 있게 했다.
+   실제 OS 스케줄러의 priority inheritance는 아니지만 RTOS priority inversion 개념을 관찰할 수 있다.
+
+3. Software Timer
+
+   `RtosSoftwareTimer`를 추가했다.
+   one-shot timer와 periodic timer를 지원한다.
+   내부적으로는 `Task.Delay`를 사용하므로 하드 실시간 timer는 아니지만 RTOS software timer 개념을 테스트할 수 있다.
+
+4. Trace Log
+
+   `RtosTraceLog`와 `RtosTraceEntry`를 추가했다.
+   `SchedulerService.TraceLog`에서 태스크 등록, 스케줄러 시작/정지, 태스크 실행 시작/완료/실패 기록을 확인할 수 있다.
+
+5. Runtime Statistics
+
+   `TaskRuntimeInfo`와 `ScheduledTaskSnapshot`에 실행 통계를 추가했다.
+
+   - `MinDuration`
+   - `MaxDuration`
+   - `AverageDuration`
+   - `LastStartDelay`
+   - `MaxStartDelay`
+   - `DeadlineMissCount`
+
+6. 테스트 추가
+
+   WpfSamples의 RTOS Tests에 다음 항목을 추가했다.
+
+   - `EventFlags wait-any completes when flag is set`
+   - `EventFlags wait-all waits for all flags`
+   - `Mutex tracks owner and priority inheritance`
+   - `SoftwareTimer one-shot fires once`
+   - `SoftwareTimer periodic fires repeatedly`
+   - `Scheduler records trace entries`
+   - `Scheduler snapshot contains runtime statistics`
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-22 RTOS Stability Fix Update
+
+코드 리뷰에서 확인한 취약점을 수정했다.
+
+1. `RtosEventFlags` cancellation/timeout 정리 보강
+
+   `CancellationToken.Register` 반환값을 보관하고, 대기 완료/취소 시 registration과 timeout CTS를 정리하도록 변경했다.
+   timeout 값은 waiter 등록 전에 검증하도록 변경했다.
+   외부 cancellation과 timeout cancellation 모두 대기자 목록에서 waiter를 제거하도록 정리했다.
+
+2. `RtosSoftwareTimer.Dispose()` 안정성 보강
+
+   실행 중인 timer task가 있을 때 `CancellationTokenSource`를 즉시 dispose하지 않고 task 완료 후 dispose하도록 변경했다.
+   fire-and-forget dispose 경로에서도 task exception을 관찰해 unobserved exception 가능성을 줄였다.
+
+3. `SchedulerService.Dispose()` CTS 정리 책임 단일화
+
+   실행 중인 scheduler loop가 있는 경우 `RunAsync` 종료 경로의 cleanup에서 CTS를 정리하도록 변경했다.
+   dispose 경로와 cleanup continuation이 같은 CTS를 동시에 정리할 수 있는 가능성을 줄였다.
+
+4. Runtime statistics overflow 방어
+
+   `_totalDurationTicks` 누적 시 `long.MaxValue`로 clamp하도록 변경했다.
+   `RunCount`도 `long.MaxValue` 이상 증가하지 않도록 방어했다.
+
+5. `RtosMessageQueue<T>` Send rollback 보강
+
+   `_spaces.WaitAsync` 성공 이후 enqueue/release 과정에서 예외가 발생하면 dispose 중이 아닌 경우 space count를 복구하도록 변경했다.
+
+6. 테스트 추가
+
+   WpfSamples의 RTOS Tests에 다음 항목을 추가했다.
+
+   - `EventFlags wait observes timeout`
+   - `EventFlags wait observes cancellation`
+   - `SoftwareTimer dispose does not throw while callback runs`
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+빌드 결과: 경고 0개, 오류 0개.

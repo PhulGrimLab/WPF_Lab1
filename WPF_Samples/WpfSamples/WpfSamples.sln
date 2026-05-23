@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wpf.Lib.Common", "..\Wpf.Li
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wpf.Lib.RTOS", "..\Wpf.Lib.RTOS\Wpf.Lib.RTOS.csproj", "{4AC7EF30-41F3-4878-AE76-5885CA957AC2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfSamples.Tests.Cli", "..\WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj", "{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,14 @@ Global
 		{4AC7EF30-41F3-4878-AE76-5885CA957AC2}.Release|Any CPU.Build.0 = Release|Any CPU
 		{4AC7EF30-41F3-4878-AE76-5885CA957AC2}.Release|x64.ActiveCfg = Release|Any CPU
 		{4AC7EF30-41F3-4878-AE76-5885CA957AC2}.Release|x64.Build.0 = Release|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Debug|x64.Build.0 = Debug|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Release|x64.ActiveCfg = Release|Any CPU
+		{9A53B57F-679E-4E40-BF03-EA02B2D9B4BA}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

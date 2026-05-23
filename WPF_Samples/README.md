@@ -45,6 +45,7 @@ WPF 기반 RTOS 학습/시뮬레이션 데모 프로그램입니다.
 ```text
 Wpf.Lib.RTOS      // 스케줄러/primitive 라이브러리
 WpfSamples        // WPF 데모 앱(UI + 테스트 실행)
+WpfSamples.Tests.Cli // 선점/스케줄러 검증용 콘솔 테스트 러너
 Docs              // 초보자/심화 문서
 ```
 
@@ -60,6 +61,21 @@ dotnet build WpfSamples/WpfSamples.sln
 dotnet run --project WpfSamples/WpfSamples.csproj
 ```
 
+3. 선점 관련 CLI 테스트 실행
+```bash
+dotnet run --project WpfSamples.Tests.Cli/WpfSamples.Tests.Cli.csproj
+```
+
+4. 반복 실행(재현성 확인)
+```bash
+dotnet run --project WpfSamples.Tests.Cli/WpfSamples.Tests.Cli.csproj -- --repeat 3
+```
+
+5. time quantum 비교 실행(3ms/4ms/5ms)
+```bash
+dotnet run --project WpfSamples.Tests.Cli/WpfSamples.Tests.Cli.csproj -- --compare-quantum
+```
+
 ## 참고
 
 1. 본 프로젝트는 학습용 RTOS 시뮬레이터입니다.
@@ -73,3 +89,30 @@ dotnet run --project WpfSamples/WpfSamples.csproj
 3. [Docs/RTOS_Test_Guide.md](Docs/RTOS_Test_Guide.md)
 4. [Docs/RTOS_Primitives_Deep_Dive.md](Docs/RTOS_Primitives_Deep_Dive.md)
 5. [Docs/RTOS_Real_vs_Simulator_Gap.md](Docs/RTOS_Real_vs_Simulator_Gap.md)
+6. [Docs/RTOS_Junior_Code_Maintenance_Guide.md](Docs/RTOS_Junior_Code_Maintenance_Guide.md)
+7. [Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md](Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md)
+8. [Docs/RTOS_Junior_HandsOn_Labs.md](Docs/RTOS_Junior_HandsOn_Labs.md)
+
+## 추천 문서 읽기 순서
+
+처음 학습할 때는 아래 순서로 읽는 것을 권장합니다.
+
+1. [Docs/RTOS_Beginner_Quick_Start.md](Docs/RTOS_Beginner_Quick_Start.md)
+- 30분 기준으로 핵심 흐름을 빠르게 잡을 수 있습니다.
+
+2. [Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md](Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md)
+- 최초 구현부터 선점/스케줄링/테스트 고도화까지 재구현 관점으로 이해할 수 있습니다.
+
+3. [Docs/RTOS_Junior_HandsOn_Labs.md](Docs/RTOS_Junior_HandsOn_Labs.md)
+- Lab 1→2→3 순서로 실제 구현 연습을 진행할 수 있습니다.
+
+4. [Docs/RTOS_Junior_Code_Maintenance_Guide.md](Docs/RTOS_Junior_Code_Maintenance_Guide.md)
+- 기존 코드 수정/보완 시 변경 포인트와 검증 절차를 확인할 수 있습니다.
+
+5. [Docs/RTOS_Test_Guide.md](Docs/RTOS_Test_Guide.md)
+- 수정 후 테스트 실행/해석 방법을 빠르게 확인할 수 있습니다.
+
+심화 학습은 아래 순서로 권장합니다.
+
+1. [Docs/SchedulerService_Flow.md](Docs/SchedulerService_Flow.md)
+2. [Docs/RTOS_Primitives_Deep_Dive.md](Docs/RTOS_Primitives_Deep_Dive.md)

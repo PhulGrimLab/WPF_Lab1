@@ -11,6 +11,7 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     private readonly object _syncRoot = new();
     private CancellationTokenSource? _cts;
     private Task? _runTask;
+    private int _isDisposed;
 
     /// <summary>
     /// 타이머를 생성합니다.
@@ -54,8 +55,12 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     /// </summary>
     public void Start()
     {
+        ThrowIfDisposed();
+
         lock (_syncRoot)
         {
+            ThrowIfDisposed();
+
             if (_runTask is not null && !_runTask.IsCompleted)
             {
                 return;
@@ -71,6 +76,8 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     /// </summary>
     public async Task StopAsync()
     {
+        ThrowIfDisposed();
+
         CancellationTokenSource? cts;
         Task? runTask;
 
@@ -110,6 +117,11 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+        {
+            return;
+        }
+
         CancellationTokenSource? cts;
         Task? runTask;
 
@@ -129,7 +141,43 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await StopAsync().ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        CancellationTokenSource? cts;
+        Task? runTask;
+
+        lock (_syncRoot)
+        {
+            cts = _cts;
+            runTask = _runTask;
+            _cts = null;
+        }
+
+        cts?.Cancel();
+
+        if (runTask is not null)
+        {
+            try
+            {
+                await runTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        lock (_syncRoot)
+        {
+            if (ReferenceEquals(_runTask, runTask))
+            {
+                _runTask = null;
+            }
+        }
+
+        cts?.Dispose();
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -222,5 +270,10 @@ public sealed class RtosSoftwareTimer : IAsyncDisposable, IDisposable
     private static void ObserveTaskException(Task? task)
     {
         _ = task?.Exception;
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
     }
 }

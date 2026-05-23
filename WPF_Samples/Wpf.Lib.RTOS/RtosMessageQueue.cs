@@ -9,6 +9,7 @@ public sealed class RtosMessageQueue<T> : IDisposable
     private readonly Queue<T> _queue = new();
     private readonly SemaphoreSlim _items;
     private readonly SemaphoreSlim _spaces;
+    private readonly CancellationTokenSource _shutdownCts = new();
     private bool _isDisposed;
 
     /// <summary>
@@ -58,7 +59,19 @@ public sealed class RtosMessageQueue<T> : IDisposable
     {
         ThrowIfDisposed();
 
-        if (!await _spaces.WaitAsync(timeout, cancellationToken).ConfigureAwait(false))
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
+
+        bool acquiredSpace;
+        try
+        {
+            acquiredSpace = await _spaces.WaitAsync(timeout, linkedCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_shutdownCts.IsCancellationRequested)
+        {
+            throw new ObjectDisposedException(nameof(RtosMessageQueue<T>));
+        }
+
+        if (!acquiredSpace)
         {
             return false;
         }
@@ -95,7 +108,19 @@ public sealed class RtosMessageQueue<T> : IDisposable
     {
         ThrowIfDisposed();
 
-        if (!await _items.WaitAsync(timeout, cancellationToken).ConfigureAwait(false))
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
+
+        bool hasItem;
+        try
+        {
+            hasItem = await _items.WaitAsync(timeout, linkedCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_shutdownCts.IsCancellationRequested)
+        {
+            throw new ObjectDisposedException(nameof(RtosMessageQueue<T>));
+        }
+
+        if (!hasItem)
         {
             return (false, default);
         }
@@ -120,6 +145,8 @@ public sealed class RtosMessageQueue<T> : IDisposable
     /// </summary>
     public void Dispose()
     {
+        bool shouldCancel;
+
         lock (_syncRoot)
         {
             if (_isDisposed)
@@ -129,8 +156,12 @@ public sealed class RtosMessageQueue<T> : IDisposable
 
             _isDisposed = true;
             _queue.Clear();
-            _items.Dispose();
-            _spaces.Dispose();
+            shouldCancel = true;
+        }
+
+        if (shouldCancel)
+        {
+            _shutdownCts.Cancel();
         }
     }
 
@@ -151,7 +182,14 @@ public sealed class RtosMessageQueue<T> : IDisposable
                 return;
             }
 
-            _spaces.Release();
+            try
+            {
+                _spaces.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Dispose 경합 시에는 반환 토큰 복구를 생략한다.
+            }
         }
     }
 }

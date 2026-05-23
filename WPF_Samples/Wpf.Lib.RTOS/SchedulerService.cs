@@ -10,26 +10,32 @@ namespace Wpf.Lib.RTOS
         private readonly object _syncRoot = new();
         private readonly object _stateSyncRoot = new();
         private readonly List<IScheduledTask> _tasks = [];
-        private readonly List<IScheduledTask> _runnableBuffer = [];
         private readonly List<IScheduledTask> _executionBuffer = [];
         private readonly Dictionary<IScheduledTask, TaskRuntimeInfo> _runtimeInfos = [];
+        private readonly Dictionary<IScheduledTask, DateTimeOffset> _disabledRevisitAt = [];
+        private readonly PriorityQueue<IScheduledTask, DueTaskPriority> _dueTaskQueue = new(DueTaskPriorityComparer.Instance);
         private static readonly AsyncLocal<bool> s_isSchedulerExecution = new();
         private readonly TimeSpan _tickInterval;
         private readonly TimeSpan _snapshotInterval;
+        private readonly TimeSpan? _timeQuantum;
         private CancellationTokenSource? _cts;
         private Task? _runTask;
         private DateTimeOffset _nextSnapshotAt = DateTimeOffset.MinValue;
         private SchedulerRunState _state = SchedulerRunState.Stopped;
+        private long _dueSequence;
+        private bool _isDueQueueDirty;
 
         /// <summary>
         /// 스케줄러를 생성합니다.
         /// </summary>
-        /// <param name="tickInterval">실행 루프 간격입니다. 기본값은 10ms입니다.</param>
+        /// <param name="tickInterval">최대 폴링 간격입니다. 기본값은 10ms입니다.</param>
         /// <param name="snapshotInterval">SnapshotChanged 이벤트 발행 간격입니다. 기본값은 100ms입니다.</param>
-        public SchedulerService(TimeSpan? tickInterval = null, TimeSpan? snapshotInterval = null)
+        /// <param name="timeQuantum">선점 근사를 위한 실행 시간 조각입니다. null이면 비활성입니다.</param>
+        public SchedulerService(TimeSpan? tickInterval = null, TimeSpan? snapshotInterval = null, TimeSpan? timeQuantum = null)
         {
             _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(10);
             _snapshotInterval = snapshotInterval ?? TimeSpan.FromMilliseconds(100);
+            _timeQuantum = timeQuantum;
 
             if (_tickInterval <= TimeSpan.Zero)
             {
@@ -39,6 +45,11 @@ namespace Wpf.Lib.RTOS
             if (_snapshotInterval <= TimeSpan.Zero)
             {
                 throw new ArgumentOutOfRangeException(nameof(snapshotInterval), "Snapshot interval must be greater than zero.");
+            }
+
+            if (_timeQuantum is not null && _timeQuantum <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(timeQuantum), "Time quantum must be greater than zero.");
             }
         }
 
@@ -90,6 +101,7 @@ namespace Wpf.Lib.RTOS
 
                 _tasks.Add(task);
                 _runtimeInfos[task] = new TaskRuntimeInfo();
+                EnqueueTaskUnsafe(task);
             }
 
             TraceLog.Add("Scheduler", "Task registered.", GetTaskName(task));
@@ -113,6 +125,11 @@ namespace Wpf.Lib.RTOS
             {
                 removed = _tasks.Remove(task);
                 _runtimeInfos.Remove(task);
+                _disabledRevisitAt.Remove(task);
+                if (removed)
+                {
+                    _isDueQueueDirty = true;
+                }
             }
 
             if (removed)
@@ -135,6 +152,9 @@ namespace Wpf.Lib.RTOS
             {
                 _tasks.Clear();
                 _runtimeInfos.Clear();
+                _disabledRevisitAt.Clear();
+                _dueTaskQueue.Clear();
+                _isDueQueueDirty = false;
             }
 
             TraceLog.Add("Scheduler", "All tasks cleared.");
@@ -340,7 +360,12 @@ namespace Wpf.Lib.RTOS
                     }
 
                     PublishSnapshotIfDue(now);
-                    await Task.Delay(_tickInterval, cancellationToken).ConfigureAwait(false);
+
+                    var delay = GetLoopDelay(now);
+                    if (delay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -359,31 +384,52 @@ namespace Wpf.Lib.RTOS
 
         private void CopyRunnableTasks(DateTimeOffset now, List<IScheduledTask> destination)
         {
-            // 1) 등록 태스크 목록은 lock 안에서 빠르게 복사만 한다.
-            //    (외부 태스크 속성 접근이 느릴 수 있으므로 lock 구간을 최소화)
-            lock (_syncRoot)
-            {
-                _runnableBuffer.Clear();
-
-                foreach (var task in _tasks)
-                {
-                    _runnableBuffer.Add(task);
-                }
-            }
-
             destination.Clear();
 
-            // 2) lock 밖에서 runnable 조건(Enabled + NextRunAt<=now)을 평가한다.
-            foreach (var task in _runnableBuffer)
+            lock (_syncRoot)
             {
-                if (TryGetTaskValue(task, candidate => candidate.IsEnabled, false)
-                    && TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue) <= now)
+                RebuildDueQueueIfDirtyUnsafe();
+
+                while (_dueTaskQueue.TryPeek(out var task, out var duePriority))
                 {
+                    if (!_runtimeInfos.ContainsKey(task))
+                    {
+                        _dueTaskQueue.Dequeue();
+                        _disabledRevisitAt.Remove(task);
+                        continue;
+                    }
+
+                    var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
+                    var nextRunAt = TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue);
+                    var expectedNextRunAt = GetExpectedQueueNextRunAtUnsafe(task, isEnabled, nextRunAt);
+
+                    if (!IsQueuePriorityCurrent(duePriority, task, expectedNextRunAt))
+                    {
+                        _dueTaskQueue.Dequeue();
+                        EnqueueTaskUnsafe(task, expectedNextRunAt);
+                        continue;
+                    }
+
+                    if (expectedNextRunAt > now)
+                    {
+                        break;
+                    }
+
+                    _dueTaskQueue.Dequeue();
+
+                    if (!isEnabled)
+                    {
+                        var revisitAt = now + _tickInterval;
+                        _disabledRevisitAt[task] = revisitAt;
+                        EnqueueTaskUnsafe(task, revisitAt);
+                        continue;
+                    }
+
                     destination.Add(task);
                 }
             }
 
-            // 3) 우선순위(높은 순) -> 실행 예정 시각(빠른 순)으로 정렬한다.
+            // runnable 집합에서 우선순위(높은 순) -> 실행 예정 시각(빠른 순)으로 정렬
             destination.Sort(CompareRunnableTasks);
         }
 
@@ -395,15 +441,24 @@ namespace Wpf.Lib.RTOS
             }
         }
 
-        private static int CompareRunnableTasks(IScheduledTask x, IScheduledTask y)
+        private int CompareRunnableTasks(IScheduledTask x, IScheduledTask y)
         {
+            var xNextRunAt = TryGetTaskValue(x, task => task.NextRunAt, DateTimeOffset.MaxValue);
+            var yNextRunAt = TryGetTaskValue(y, task => task.NextRunAt, DateTimeOffset.MaxValue);
+
+            // 예정 시각 차이가 tick 간격보다 충분히 크면, 더 먼저 예정된 태스크를 우선한다.
+            var dueGapTicks = (xNextRunAt - yNextRunAt).Ticks;
+            if (Math.Abs(dueGapTicks) > _tickInterval.Ticks)
+            {
+                return xNextRunAt.CompareTo(yNextRunAt);
+            }
+
             var xPriority = TryGetTaskValue(x, task => task.Priority, Enum_TaskPriority.Low);
             var yPriority = TryGetTaskValue(y, task => task.Priority, Enum_TaskPriority.Low);
             var priorityComparison = yPriority.CompareTo(xPriority);
             return priorityComparison != 0
                 ? priorityComparison
-                : TryGetTaskValue(x, task => task.NextRunAt, DateTimeOffset.MaxValue)
-                    .CompareTo(TryGetTaskValue(y, task => task.NextRunAt, DateTimeOffset.MaxValue));
+                : xNextRunAt.CompareTo(yNextRunAt);
         }
 
         private async Task ExecuteTaskAsync(IScheduledTask task, DateTimeOffset now, CancellationToken cancellationToken)
@@ -411,13 +466,22 @@ namespace Wpf.Lib.RTOS
             var stopwatch = Stopwatch.StartNew();
             var completedAt = now;
             var executionContext = new SchedulerContext(now, () => ShouldYieldToHigherPriorityTask(task));
+            CancellationTokenSource? quantumCts = null;
+            var executionToken = cancellationToken;
+
+            if (_timeQuantum is not null)
+            {
+                quantumCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                quantumCts.CancelAfter(_timeQuantum.Value);
+                executionToken = quantumCts.Token;
+            }
 
             MarkTaskStarted(task, now, DateTimeOffset.Now, Environment.CurrentManagedThreadId);
             TraceLog.Add("Task", "Task execution started.", GetTaskName(task));
 
             try
             {
-                await task.ExecuteAsync(executionContext, cancellationToken).ConfigureAwait(false);
+                await task.ExecuteAsync(executionContext, executionToken).ConfigureAwait(false);
 
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
@@ -425,11 +489,22 @@ namespace Wpf.Lib.RTOS
                 // Periodic 태스크는 Ready 상태로, OneShot 태스크는 Suspended 상태로 전환
                 var nextState = CalculateNextTaskState(task, completedAt);
                 MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState, Environment.CurrentManagedThreadId);
-                TraceLog.Add("Task", $"Task execution completed in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
+                var completionKind = executionContext.IsPreempted ? "preempted" : "completed";
+                TraceLog.Add("Task", $"Task execution {completionKind} in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (OperationCanceledException) when (quantumCts is not null && quantumCts.IsCancellationRequested)
+            {
+                stopwatch.Stop();
+                completedAt = DateTimeOffset.Now;
+                executionContext.MarkPreempted();
+
+                var nextState = CalculateNextTaskState(task, completedAt);
+                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState, Environment.CurrentManagedThreadId);
+                TraceLog.Add("Task", $"Task execution preempted by time quantum in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (Exception ex)
             {
@@ -442,7 +517,8 @@ namespace Wpf.Lib.RTOS
             }
             finally
             {
-                ScheduleNextRunIfRegistered(task, now, completedAt);
+                ScheduleNextRunIfRegistered(task, now, completedAt, executionContext.IsPreempted);
+                quantumCts?.Dispose();
             }
         }
 
@@ -450,6 +526,7 @@ namespace Wpf.Lib.RTOS
         {
             var runningPriority = TryGetTaskValue(runningTask, task => task.Priority, Enum_TaskPriority.Low);
             var now = DateTimeOffset.Now;
+            List<IScheduledTask> candidates;
 
             lock (_syncRoot)
             {
@@ -458,40 +535,42 @@ namespace Wpf.Lib.RTOS
                     return false;
                 }
 
-                foreach (var candidate in _tasks)
+                candidates = new List<IScheduledTask>(_tasks);
+            }
+
+            foreach (var candidate in candidates)
+            {
+                if (ReferenceEquals(candidate, runningTask))
                 {
-                    if (ReferenceEquals(candidate, runningTask))
-                    {
-                        continue;
-                    }
-
-                    if (!_runtimeInfos.ContainsKey(candidate))
-                    {
-                        continue;
-                    }
-
-                    if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
-                    {
-                        continue;
-                    }
-
-                    var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
-                    if (candidatePriority <= runningPriority)
-                    {
-                        continue;
-                    }
-
-                    var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
-
-                    // "더 높은 우선순위" + "지금 실행 가능"이면 양보 신호를 true로 준다.
-                    if (candidateNextRunAt <= now)
-                    {
-                        return true;
-                    }
+                    continue;
                 }
 
-                return false;
+                if (!IsTaskRegistered(candidate))
+                {
+                    continue;
+                }
+
+                if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
+                {
+                    continue;
+                }
+
+                var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
+                if (candidatePriority <= runningPriority)
+                {
+                    continue;
+                }
+
+                var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
+
+                // "더 높은 우선순위" + "지금 실행 가능"이면 양보 신호를 true로 준다.
+                if (candidateNextRunAt <= now)
+                {
+                    return true;
+                }
             }
+
+            return false;
         }
 
         private void MarkTaskStarted(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset startedAt, int threadId)
@@ -527,7 +606,7 @@ namespace Wpf.Lib.RTOS
             }
         }
 
-        private void ScheduleNextRunIfRegistered(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset completedAt)
+        private void ScheduleNextRunIfRegistered(IScheduledTask task, DateTimeOffset scheduledAt, DateTimeOffset completedAt, bool isPreempted)
         {
             lock (_syncRoot)
             {
@@ -545,25 +624,140 @@ namespace Wpf.Lib.RTOS
                 {
                     task.SetEnabled(false);
                     task.NextRunAt = DateTimeOffset.MaxValue;
+                    EnqueueTaskUnsafe(task, DateTimeOffset.MaxValue);
                     TraceLog.Add("Scheduler", "OneShot task completed and disabled.", GetTaskName(task));
                 }
                 else
                 {
                     // Periodic 태스크는 정책(FixedRate/FixedDelay/SkipMissedTicks)에 따라
                     // 다음 실행 시각을 계산한다.
+                    if (isPreempted)
+                    {
+                        task.NextRunAt = completedAt;
+                        EnqueueTaskUnsafe(task, completedAt);
+                        TraceLog.Add("Scheduler", "Preempted task rescheduled immediately.", GetTaskName(task));
+                        return;
+                    }
+
                     task.NextRunAt = GetNextRunAt(mode, overrunPolicy, period, scheduledAt, completedAt);
+                    EnqueueTaskUnsafe(task);
                 }
             }
         }
 
-        private void PublishSnapshotIfDue(DateTimeOffset now)
+        private TimeSpan GetLoopDelay(DateTimeOffset now)
         {
-            if (now < _nextSnapshotAt)
+            lock (_syncRoot)
+            {
+                RebuildDueQueueIfDirtyUnsafe();
+
+                while (_dueTaskQueue.TryPeek(out var task, out var duePriority))
+                {
+                    if (!_runtimeInfos.ContainsKey(task))
+                    {
+                        _dueTaskQueue.Dequeue();
+                        _disabledRevisitAt.Remove(task);
+                        continue;
+                    }
+
+                    var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
+                    var latestNextRunAt = TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue);
+                    var expectedNextRunAt = GetExpectedQueueNextRunAtUnsafe(task, isEnabled, latestNextRunAt);
+
+                    if (!IsQueuePriorityCurrent(duePriority, task, expectedNextRunAt))
+                    {
+                        _dueTaskQueue.Dequeue();
+                        EnqueueTaskUnsafe(task, expectedNextRunAt);
+                        continue;
+                    }
+
+                    if (expectedNextRunAt <= now)
+                    {
+                        return TimeSpan.Zero;
+                    }
+
+                    var untilDue = expectedNextRunAt - now;
+                    return untilDue < _tickInterval
+                        ? untilDue
+                        : _tickInterval;
+                }
+
+                return _tickInterval;
+            }
+        }
+
+        private void RebuildDueQueueIfDirtyUnsafe()
+        {
+            if (!_isDueQueueDirty)
             {
                 return;
             }
 
-            _nextSnapshotAt = now + _snapshotInterval;
+            _dueTaskQueue.Clear();
+
+            foreach (var task in _tasks)
+            {
+                if (_runtimeInfos.ContainsKey(task))
+                {
+                    EnqueueTaskUnsafe(task);
+                }
+            }
+
+            _isDueQueueDirty = false;
+        }
+
+        private void EnqueueTaskUnsafe(IScheduledTask task)
+        {
+            var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
+            var nextRunAt = TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue);
+            EnqueueTaskUnsafe(task, GetExpectedQueueNextRunAtUnsafe(task, isEnabled, nextRunAt));
+        }
+
+        private void EnqueueTaskUnsafe(IScheduledTask task, DateTimeOffset nextRunAt)
+        {
+            _dueTaskQueue.Enqueue(task, CreateDuePriority(task, nextRunAt));
+        }
+
+        private DueTaskPriority CreateDuePriority(IScheduledTask task, DateTimeOffset nextRunAt)
+        {
+            return new DueTaskPriority(
+                nextRunAt.UtcTicks,
+                -1 * (int)TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low),
+                Interlocked.Increment(ref _dueSequence));
+        }
+
+        private static bool IsQueuePriorityCurrent(DueTaskPriority queuedPriority, IScheduledTask task, DateTimeOffset nextRunAt)
+        {
+            var currentPriorityOrder = -1 * (int)TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low);
+            return queuedPriority.NextRunTicks == nextRunAt.UtcTicks
+                && queuedPriority.PriorityOrder == currentPriorityOrder;
+        }
+
+        private DateTimeOffset GetExpectedQueueNextRunAtUnsafe(IScheduledTask task, bool isEnabled, DateTimeOffset nextRunAt)
+        {
+            if (isEnabled)
+            {
+                _disabledRevisitAt.Remove(task);
+                return nextRunAt;
+            }
+
+            return _disabledRevisitAt.TryGetValue(task, out var revisitAt)
+                ? revisitAt
+                : nextRunAt;
+        }
+
+        private void PublishSnapshotIfDue(DateTimeOffset now)
+        {
+            lock (_stateSyncRoot)
+            {
+                if (now < _nextSnapshotAt)
+                {
+                    return;
+                }
+
+                _nextSnapshotAt = now + _snapshotInterval;
+            }
+
             PublishSnapshot();
         }
 
@@ -571,7 +765,10 @@ namespace Wpf.Lib.RTOS
         {
             if (force)
             {
-                _nextSnapshotAt = DateTimeOffset.Now + _snapshotInterval;
+                lock (_stateSyncRoot)
+                {
+                    _nextSnapshotAt = DateTimeOffset.Now + _snapshotInterval;
+                }
             }
 
             var taskSnapshots = CreateTaskSnapshots();
@@ -875,6 +1072,33 @@ namespace Wpf.Lib.RTOS
             Running,
             Stopping,
             Disposed
+        }
+
+        private readonly record struct DueTaskPriority(
+            long NextRunTicks,
+            int PriorityOrder,
+            long Sequence);
+
+        private sealed class DueTaskPriorityComparer : IComparer<DueTaskPriority>
+        {
+            public static DueTaskPriorityComparer Instance { get; } = new();
+
+            public int Compare(DueTaskPriority x, DueTaskPriority y)
+            {
+                var nextRunComparison = x.NextRunTicks.CompareTo(y.NextRunTicks);
+                if (nextRunComparison != 0)
+                {
+                    return nextRunComparison;
+                }
+
+                var priorityComparison = x.PriorityOrder.CompareTo(y.PriorityOrder);
+                if (priorityComparison != 0)
+                {
+                    return priorityComparison;
+                }
+
+                return x.Sequence.CompareTo(y.Sequence);
+            }
         }
     }
 }

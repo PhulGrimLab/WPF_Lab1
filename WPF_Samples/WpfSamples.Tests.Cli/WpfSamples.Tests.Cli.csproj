@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wpf.Lib.Common\Wpf.Lib.Common.csproj" />
+    <ProjectReference Include="..\Wpf.Lib.RTOS\Wpf.Lib.RTOS.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\WpfSamples\Tests\RtosAssert.cs" Link="Tests\RtosAssert.cs" />
+    <Compile Include="..\WpfSamples\Tests\RtosTestResult.cs" Link="Tests\RtosTestResult.cs" />
+    <Compile Include="..\WpfSamples\Tests\RtosTestRunner.cs" Link="Tests\RtosTestRunner.cs" />
+  </ItemGroup>
+
+</Project>

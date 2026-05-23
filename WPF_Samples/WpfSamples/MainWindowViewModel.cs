@@ -723,7 +723,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         var demoScheduler = new SchedulerService(
             tickInterval: TimeSpan.FromMilliseconds(5),
-            snapshotInterval: TimeSpan.FromMilliseconds(50));
+            snapshotInterval: TimeSpan.FromMilliseconds(50),
+            timeQuantum: TimeSpan.FromMilliseconds(4));
 
         demoScheduler.SchedulerError += (_, ex) =>
         {
@@ -742,6 +743,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             Enum_TaskExecutionMode.Periodic,
             async (_, cancellationToken) =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 var count = Interlocked.Increment(ref _preemptionNormalRunCountCounter);
                 Interlocked.Exchange(ref _lastNormalRunTick, DateTime.UtcNow.Ticks);
@@ -757,6 +759,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             Enum_TaskExecutionMode.Periodic,
             async (_, cancellationToken) =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var startedTicks = DateTime.UtcNow.Ticks;
                 var previousStartedTicks = Interlocked.Exchange(ref _lastHighStartTick, startedTicks);
                 if (previousStartedTicks > 0)
@@ -774,6 +777,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
                 for (var burst = 1; burst <= 3; burst++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     await Task.Delay(4, cancellationToken).ConfigureAwait(false);
                     QueuePreemptionLog($"High Priority Urgent burst {burst}/3 완료");
                 }
@@ -798,14 +802,22 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             Enum_TaskExecutionMode.Periodic,
             async (context, cancellationToken) =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
+                var startUnit = Math.Clamp(Volatile.Read(ref stats.NextWorkUnit), 0, workUnits);
+
                 RecordLowWorkerResume(name);
                 Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 Interlocked.Exchange(ref _lastLowWorkTick, DateTime.UtcNow.Ticks);
 
-                for (var i = 0; i < workUnits; i++)
+                for (var i = startUnit; i < workUnits; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     if (context.ShouldYield())
                     {
+                        Interlocked.Exchange(ref stats.NextWorkUnit, i);
+                        context.MarkPreempted();
                         Interlocked.Increment(ref _preemptionYieldCountCounter);
                         Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
                         RecordLowWorkerYield(name);
@@ -815,11 +827,18 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
                     Interlocked.Increment(ref _preemptionLowWorkUnitsCounter);
                     await Task.Delay(delayMilliseconds, cancellationToken).ConfigureAwait(false);
+                    Interlocked.Exchange(ref stats.NextWorkUnit, i + 1);
                 }
 
                 QueuePreemptionLog($"{name}가 긴 low-priority 작업 슬라이스 1회를 완료했습니다. workUnits={workUnits}");
+                Interlocked.Exchange(ref stats.NextWorkUnit, 0);
             },
-            statusProvider: () => $"{workUnits} work units / {period.TotalMilliseconds:N0}ms period",
+            statusProvider: () =>
+            {
+                var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
+                var nextUnit = Math.Clamp(Volatile.Read(ref stats.NextWorkUnit), 0, workUnits);
+                return $"{nextUnit}/{workUnits} units / {period.TotalMilliseconds:N0}ms period";
+            },
             overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay));
     }
 
@@ -1409,6 +1428,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private sealed class LowWorkerRuntimeStats
     {
         public int YieldCount;
+        public int NextWorkUnit;
         public long LastYieldUtcTicks;
         public long LastResumeDelayTicks;
         public long LastResumeUtcTicks;

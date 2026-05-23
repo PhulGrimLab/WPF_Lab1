@@ -6,6 +6,7 @@
     public sealed class SchedulerContext
     {
         private readonly Func<bool>? _shouldYield;
+        private bool _isPreempted;
 
         /// <summary>
         /// 역할: 컨텍스트를 생성합니다.
@@ -30,5 +31,15 @@
         {
             return _shouldYield?.Invoke() ?? false;
         }
+
+        /// <summary>
+        /// 역할: 현재 실행 조각이 높은 우선순위 태스크에 의해 선점되었음을 표시합니다.
+        /// </summary>
+        public void MarkPreempted()
+        {
+            _isPreempted = true;
+        }
+
+        internal bool IsPreempted => _isPreempted;
     }
 }

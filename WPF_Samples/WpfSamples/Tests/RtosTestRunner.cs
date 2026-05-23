@@ -16,6 +16,8 @@ internal static class RtosTestRunner
             ("MessageQueue send/receive", MessageQueueSendReceiveAsync),
             ("MessageQueue preserves FIFO order", MessageQueuePreservesFifoOrderAsync),
             ("MessageQueue receive timeout", MessageQueueReceiveTimeoutAsync),
+            ("MessageQueue pending send is canceled by dispose", MessageQueuePendingSendCanceledByDisposeAsync),
+            ("MessageQueue pending receive is canceled by dispose", MessageQueuePendingReceiveCanceledByDisposeAsync),
             ("MessageQueue throws after dispose", MessageQueueThrowsAfterDisposeAsync),
             ("EventFlags wait-any completes when flag is set", EventFlagsWaitAnyCompletesAsync),
             ("EventFlags wait-all waits for all flags", EventFlagsWaitAllCompletesAsync),
@@ -24,17 +26,21 @@ internal static class RtosTestRunner
             ("EventFlags dispose cancels pending wait", EventFlagsDisposeCancelsPendingWaitAsync),
             ("EventFlags registration failure does not leak waiter", EventFlagsRegistrationFailureDoesNotLeakWaiterAsync),
             ("Mutex tracks owner and priority inheritance", MutexTracksOwnerAndPriorityInheritanceAsync),
+            ("Mutex rejects reentrant owner", MutexRejectsReentrantOwnerAsync),
             ("Mutex throws after dispose", MutexThrowsAfterDisposeAsync),
             ("SoftwareTimer one-shot fires once", SoftwareTimerOneShotFiresOnceAsync),
             ("SoftwareTimer periodic fires repeatedly", SoftwareTimerPeriodicFiresRepeatedlyAsync),
             ("SoftwareTimer periodic survives callback errors", SoftwareTimerPeriodicSurvivesCallbackErrorsAsync),
             ("SoftwareTimer dispose does not throw while callback runs", SoftwareTimerDisposeDoesNotThrowWhileCallbackRunsAsync),
+            ("SoftwareTimer rejects start after dispose", SoftwareTimerRejectsStartAfterDisposeAsync),
             ("SoftwareTimer stop-start race avoids overlapping runs", SoftwareTimerStopStartRaceAvoidsOverlappingRunsAsync),
             ("TickCounter converts time to ticks", TickCounterAsync),
             ("TickCounter rejects overflow tick", TickCounterRejectsOverflowTickAsync),
             ("Scheduler executes periodic task", SchedulerExecutesPeriodicTaskAsync),
             ("Scheduler runs higher priority task first", SchedulerRunsHigherPriorityTaskFirstAsync),
             ("Scheduler cooperative preemption yields to higher priority", SchedulerCooperativePreemptionYieldsToHigherPriorityAsync),
+            ("Scheduler preempted task resumes immediately", SchedulerPreemptedTaskResumesImmediatelyAsync),
+            ("Scheduler time quantum preempts long task", SchedulerTimeQuantumPreemptsLongTaskAsync),
             ("Scheduler executes one-shot task once", SchedulerExecutesOneShotTaskOnceAsync),
             ("Scheduler stop timeout returns false", SchedulerStopTimeoutReturnsFalseAsync),
             ("Scheduler self stop with infinite timeout returns false", SchedulerSelfStopInfiniteTimeoutReturnsFalseAsync),
@@ -147,6 +153,35 @@ internal static class RtosTestRunner
         var received = await queue.ReceiveAsync(TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
 
         RtosAssert.True(!received.Success, "Empty queue receive should timeout.");
+    }
+
+    private static async Task MessageQueuePendingSendCanceledByDisposeAsync()
+    {
+        var queue = new RtosMessageQueue<int>(capacity: 1);
+
+        var firstSend = await queue.SendAsync(1, TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
+        RtosAssert.True(firstSend, "Initial send should fill the queue.");
+
+        var pendingSend = queue.SendAsync(2, TimeSpan.FromSeconds(1));
+        await Task.Delay(20).ConfigureAwait(false);
+        queue.Dispose();
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => pendingSend,
+            "Pending send should complete with ObjectDisposedException when queue is disposed.").ConfigureAwait(false);
+    }
+
+    private static async Task MessageQueuePendingReceiveCanceledByDisposeAsync()
+    {
+        var queue = new RtosMessageQueue<int>(capacity: 1);
+
+        var pendingReceive = queue.ReceiveAsync(TimeSpan.FromSeconds(1));
+        await Task.Delay(20).ConfigureAwait(false);
+        queue.Dispose();
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => pendingReceive,
+            "Pending receive should complete with ObjectDisposedException when queue is disposed.").ConfigureAwait(false);
     }
 
     private static async Task SemaphoreThrowsAfterDisposeAsync()
@@ -293,6 +328,20 @@ internal static class RtosTestRunner
             "Disposed mutex should reject Release.");
     }
 
+    private static async Task MutexRejectsReentrantOwnerAsync()
+    {
+        using var mutex = new RtosMutex();
+
+        var acquired = await mutex.WaitAsync("TaskA", Enum_TaskPriority.Normal, TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
+        RtosAssert.True(acquired, "Initial mutex acquire should succeed.");
+
+        await RtosAssert.ThrowsAsync<SynchronizationLockException>(
+            () => mutex.WaitAsync("TaskA", Enum_TaskPriority.Normal, TimeSpan.FromMilliseconds(10)),
+            "Mutex should reject reentrant acquire for the same owner.").ConfigureAwait(false);
+
+        mutex.Release("TaskA");
+    }
+
     private static async Task SoftwareTimerOneShotFiresOnceAsync()
     {
         var fireCount = 0;
@@ -422,6 +471,24 @@ internal static class RtosTestRunner
         RtosAssert.Equal(1, maxConcurrent, "Stop-start race should not create overlapping timer runs.");
     }
 
+    private static async Task SoftwareTimerRejectsStartAfterDisposeAsync()
+    {
+        var timer = new RtosSoftwareTimer(
+            TimeSpan.FromMilliseconds(10),
+            isPeriodic: true,
+            _ => Task.CompletedTask);
+
+        await timer.DisposeAsync().ConfigureAwait(false);
+
+        RtosAssert.Throws<ObjectDisposedException>(
+            timer.Start,
+            "Disposed software timer should reject Start.");
+
+        await RtosAssert.ThrowsAsync<ObjectDisposedException>(
+            () => timer.StopAsync(),
+            "Disposed software timer should reject StopAsync.").ConfigureAwait(false);
+    }
+
     private static Task TickCounterAsync()
     {
         var startedAt = new DateTimeOffset(2026, 5, 22, 0, 0, 0, TimeSpan.Zero);
@@ -549,6 +616,151 @@ internal static class RtosTestRunner
         RtosAssert.True(completed == highCompleted.Task, "High priority task should complete without waiting for low task full work.");
         RtosAssert.True(Volatile.Read(ref lowYielded) == 1, "Low priority task should cooperatively yield when a higher priority task becomes runnable.");
         RtosAssert.Equal(1, Volatile.Read(ref highRunCount), "High priority task should run exactly once.");
+    }
+
+    private static async Task SchedulerPreemptedTaskResumesImmediatelyAsync()
+    {
+        var nextUnit = 0;
+        var yieldedAtTicks = 0L;
+        var resumedDelayTicks = 0L;
+        var highRunCount = 0;
+        var lowCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var scheduler = new SchedulerService(
+            tickInterval: TimeSpan.FromMilliseconds(5),
+            snapshotInterval: TimeSpan.FromMilliseconds(20));
+
+        var lowTask = new ScheduledTask(
+            "Low Resumable",
+            Enum_TaskPriority.Low,
+            TimeSpan.FromMilliseconds(500),
+            Enum_TaskExecutionMode.Periodic,
+            async (context, cancellationToken) =>
+            {
+                var startUnit = Volatile.Read(ref nextUnit);
+                if (startUnit > 0 && Volatile.Read(ref yieldedAtTicks) > 0)
+                {
+                    Interlocked.Exchange(
+                        ref resumedDelayTicks,
+                        DateTime.UtcNow.Ticks - Volatile.Read(ref yieldedAtTicks));
+                }
+
+                for (var i = startUnit; i < 100; i++)
+                {
+                    if (context.ShouldYield())
+                    {
+                        Interlocked.Exchange(ref nextUnit, i);
+                        Interlocked.Exchange(ref yieldedAtTicks, DateTime.UtcNow.Ticks);
+                        context.MarkPreempted();
+                        return;
+                    }
+
+                    await Task.Delay(2, cancellationToken).ConfigureAwait(false);
+                    Interlocked.Exchange(ref nextUnit, i + 1);
+                }
+
+                lowCompleted.TrySetResult();
+            },
+            overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay);
+
+        var highTask = new ScheduledTask(
+            "High Urgent",
+            Enum_TaskPriority.Critical,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.OneShot,
+            async (_, cancellationToken) =>
+            {
+                Interlocked.Increment(ref highRunCount);
+                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+            });
+
+        highTask.NextRunAt = DateTimeOffset.Now + TimeSpan.FromMilliseconds(30);
+
+        scheduler.Register(lowTask);
+        scheduler.Register(highTask);
+        scheduler.Start();
+
+        var completed = await Task.WhenAny(lowCompleted.Task, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        await scheduler.StopAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+        RtosAssert.True(completed == lowCompleted.Task, "Preempted low task should resume and finish without waiting for its full fixed-delay period.");
+        RtosAssert.Equal(1, Volatile.Read(ref highRunCount), "High priority task should run exactly once.");
+        RtosAssert.True(TimeSpan.FromTicks(Volatile.Read(ref resumedDelayTicks)) < TimeSpan.FromMilliseconds(200), "Preempted low task should resume quickly after the high priority task runs.");
+    }
+
+    private static async Task SchedulerTimeQuantumPreemptsLongTaskAsync()
+    {
+        var longTaskRunCount = 0;
+        var preemptedLogObserved = 0;
+        var highTaskExecuted = 0;
+        var highCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var timeQuantum = GetSchedulerTestTimeQuantumOrDefault(TimeSpan.FromMilliseconds(4));
+
+        await using var scheduler = new SchedulerService(
+            tickInterval: TimeSpan.FromMilliseconds(5),
+            snapshotInterval: TimeSpan.FromMilliseconds(20),
+            timeQuantum: timeQuantum);
+
+        scheduler.SnapshotChanged += (_, snapshot) =>
+        {
+            var hasPreemptedTask = snapshot.Tasks.Any(task =>
+                task.LastDuration is not null
+                && task.LastDuration.Value >= TimeSpan.FromMilliseconds(4)
+                && task.Name == "Quantum Long");
+
+            if (hasPreemptedTask)
+            {
+                Interlocked.Exchange(ref preemptedLogObserved, 1);
+            }
+        };
+
+        scheduler.Register(new ScheduledTask(
+            "Quantum Long",
+            Enum_TaskPriority.Low,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.Periodic,
+            async (_, cancellationToken) =>
+            {
+                Interlocked.Increment(ref longTaskRunCount);
+                await Task.Delay(20, cancellationToken).ConfigureAwait(false);
+            },
+            overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay));
+
+        var highTask = new ScheduledTask(
+            "Quantum High",
+            Enum_TaskPriority.Critical,
+            TimeSpan.FromMilliseconds(10),
+            Enum_TaskExecutionMode.OneShot,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref highTaskExecuted);
+                highCompleted.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        highTask.NextRunAt = DateTimeOffset.Now + TimeSpan.FromMilliseconds(25);
+        scheduler.Register(highTask);
+
+        scheduler.Start();
+
+        var completed = await Task.WhenAny(highCompleted.Task, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        await scheduler.StopAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+        RtosAssert.True(completed == highCompleted.Task, "High priority task should execute even when long task exceeds time quantum.");
+        RtosAssert.True(Volatile.Read(ref longTaskRunCount) >= 1, "Long-running task should have been executed at least once.");
+        RtosAssert.Equal(1, Volatile.Read(ref highTaskExecuted), "High priority task should run exactly once.");
+        RtosAssert.True(Volatile.Read(ref preemptedLogObserved) == 1, "Quantum preemption should leave observable execution evidence in runtime snapshots.");
+    }
+
+    private static TimeSpan GetSchedulerTestTimeQuantumOrDefault(TimeSpan fallback)
+    {
+        var envValue = Environment.GetEnvironmentVariable("RTOS_TEST_TIME_QUANTUM_MS");
+        if (!int.TryParse(envValue, out var ms) || ms <= 0)
+        {
+            return fallback;
+        }
+
+        return TimeSpan.FromMilliseconds(ms);
     }
 
     private static async Task SchedulerExecutesOneShotTaskOnceAsync()

@@ -69,15 +69,19 @@ public sealed class RtosMutex : IDisposable
             throw new ArgumentException("Owner must not be empty.", nameof(owner));
         }
 
-        var waiterId = 0L;
+        long waiterId;
 
         lock (_syncRoot)
         {
-            if (_owner is not null)
+            if (string.Equals(_owner, owner, StringComparison.Ordinal))
             {
-                waiterId = ++_nextWaiterId;
-                _waitingPriorities[waiterId] = priority;
+                throw new SynchronizationLockException("Mutex is not reentrant for the same owner.");
             }
+
+            // owner 상태 변화와 경합해도 대기자 우선순위가 누락되지 않도록
+            // Wait 진입 시점에 waiter를 먼저 등록한다.
+            waiterId = ++_nextWaiterId;
+            _waitingPriorities[waiterId] = priority;
         }
 
         var acquired = false;
@@ -90,10 +94,7 @@ public sealed class RtosMutex : IDisposable
         {
             lock (_syncRoot)
             {
-                if (waiterId != 0)
-                {
-                    _waitingPriorities.Remove(waiterId);
-                }
+                _waitingPriorities.Remove(waiterId);
             }
         }
 
