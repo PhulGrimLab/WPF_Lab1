@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -36,9 +37,17 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private SchedulerService? _preemptionTestScheduler;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _preemptionUiTimer;
+    private readonly ConcurrentQueue<string> _pendingPreemptionLogs = new();
+    private readonly ConcurrentDictionary<string, LowWorkerRuntimeStats> _lowWorkerRuntimeStats = new();
     private readonly object _snapshotSyncRoot = new();
+    private readonly object _preemptionSnapshotSyncRoot = new();
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _taskViewModels = [];
+    private readonly Dictionary<string, ScheduledTaskStatusViewModel> _preemptionTaskViewModels = [];
+    private readonly Dictionary<string, LowWorkerYieldStatsViewModel> _lowWorkerYieldViewModels = [];
+    private readonly HashSet<string> _mainActiveTaskNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _preemptionActiveTaskNames = new(StringComparer.Ordinal);
     private SchedulerSnapshot? _latestSnapshot;
+    private SchedulerSnapshot? _latestPreemptionSnapshot;
     private bool _isSnapshotApplyQueued;
     private bool _isRunningTests;
     private bool _isPreemptionTestRunning;
@@ -47,6 +56,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private string _testSummary = "Not run";
     private string _preemptionTestState = "Stopped";
     private string _lastPreemptionEvent = "-";
+    private string _preemptionHighLastInterval = "-";
     private int _preemptionLowWorkUnits;
     private int _preemptionHighRunCount;
     private int _preemptionYieldCount;
@@ -58,6 +68,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private int _preemptionYieldCountCounter;
     private int _preemptionLowLastThreadIdCounter;
     private int _preemptionHighLastThreadIdCounter;
+    private int _preemptionNormalRunCountCounter;
+    private int _preemptionNormalLastThreadIdCounter;
     private DateTime _lastTrendSecond = DateTime.MinValue;
     private int _lastYieldTotalForTrend;
     private int _preemptionTrendMaxYield = 1;
@@ -70,9 +82,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private Brush _preemptionLowStepBrush = FlowIdleBrush;
     private Brush _preemptionYieldStepBrush = FlowIdleBrush;
     private Brush _preemptionHighStepBrush = FlowIdleBrush;
+
     private long _lastLowWorkTick;
     private long _lastYieldTick;
     private long _lastHighRunTick;
+    private long _lastNormalRunTick;
+    private long _lastHighStartTick;
+    private long _preemptionHighLastIntervalTicks;
+
     private string _preemptionActiveTask = "대기 중";
     private Brush _preemptionLowInspectorBackground = InspectorIdleBackground;
     private Brush _preemptionLowInspectorBorder = InspectorIdleBorder;
@@ -86,34 +103,42 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _dispatcher = Application.Current.Dispatcher;
         _preemptionUiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(120),
+            Interval = TimeSpan.FromMilliseconds(30),
         };
         _preemptionUiTimer.Tick += OnPreemptionUiTimerTick;
 
         StartCommand = new RelayCommand(StartScheduler, () => !_scheduler.IsRunning);
+
         StopCommand = new RelayCommand(
             () => _ = StopSchedulerAsync(),
             () => _scheduler.IsRunning);
+
         RunTestsCommand = new RelayCommand(
             () => _ = RunTestsAsync(),
             () => !_isRunningTests && !_isPreemptionTestRunning);
+
         StartPreemptionTestCommand = new RelayCommand(
             () => _ = StartPreemptionTestAsync(),
             () => !_isPreemptionTestRunning && !_isRunningTests);
+
         StopPreemptionTestCommand = new RelayCommand(
             () => _ = StopPreemptionTestAsync(),
             () => _isPreemptionTestRunning);
 
         _scheduler.SnapshotChanged += OnSchedulerSnapshotChanged;
+
+        // Samples_RTOS의 Task 파일 등록
         RegisterSampleTasks();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<ScheduledTaskStatusViewModel> Tasks { get; } = [];
+    public ObservableCollection<ScheduledTaskStatusViewModel> ActiveTasks { get; } = [];
     public ObservableCollection<RtosTestResult> TestResults { get; } = [];
     public ObservableCollection<string> PreemptionLogs { get; } = [];
     public ObservableCollection<PreemptionTrendPointViewModel> PreemptionYieldTrend { get; } = [];
+    public ObservableCollection<LowWorkerYieldStatsViewModel> PreemptionLowWorkerYields { get; } = [];
 
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
@@ -193,6 +218,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
             _lastPreemptionEvent = value;
             OnPropertyChanged(nameof(LastPreemptionEvent));
+        }
+    }
+
+    public string PreemptionHighLastInterval
+    {
+        get => _preemptionHighLastInterval;
+        private set
+        {
+            if (_preemptionHighLastInterval == value)
+            {
+                return;
+            }
+
+            _preemptionHighLastInterval = value;
+            OnPropertyChanged(nameof(PreemptionHighLastInterval));
         }
     }
 
@@ -415,10 +455,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
     }
 
-    public int PreemptionLowTaskCount => 1;
-    public int PreemptionHighTaskCount => 1;
-    public string PreemptionLowTaskName => "Low Priority Worker";
-    public string PreemptionHighTaskName => "High Priority Urgent";
+    public int PreemptionLowTaskCount => 3;     // xaml에서 바인딩
+    public int PreemptionHighTaskCount => 2;    // xaml에서 바인딩
+    public string PreemptionLowTaskName => "Low Workers A/B/C";
+    public string PreemptionHighTaskName => "Normal Telemetry + High Urgent";
 
     public string PreemptionHealthLabel
     {
@@ -636,25 +676,34 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         Interlocked.Exchange(ref _preemptionYieldCountCounter, 0);
         Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, 0);
         Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, 0);
+        Interlocked.Exchange(ref _preemptionNormalRunCountCounter, 0);
+        Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, 0);
         Interlocked.Exchange(ref _lastLowWorkTick, 0);
         Interlocked.Exchange(ref _lastYieldTick, 0);
         Interlocked.Exchange(ref _lastHighRunTick, 0);
+        Interlocked.Exchange(ref _lastNormalRunTick, 0);
+        Interlocked.Exchange(ref _lastHighStartTick, 0);
+        Interlocked.Exchange(ref _preemptionHighLastIntervalTicks, 0);
+        ResetLowWorkerRuntimeStats();
         _lastTrendSecond = DateTime.MinValue;
         _lastYieldTotalForTrend = 0;
+        ClearPendingPreemptionLogs();
 
         await _dispatcher.InvokeAsync(() =>
         {
             PreemptionLogs.Clear();
             PreemptionYieldTrend.Clear();
             PreemptionTestState = "Running";
-            LastPreemptionEvent = "데모 시작: Low 1개, High 1개 구성으로 협력형 선점을 관찰합니다.";
+            LastPreemptionEvent = "데모 시작: Low 3개, Normal 1개, High 1개 구성으로 선점 흐름을 관찰합니다.";
             PreemptionLowWorkUnits = 0;
             PreemptionHighRunCount = 0;
             PreemptionYieldCount = 0;
+            PreemptionHighLastInterval = "-";
             PreemptionLowLastThreadId = 0;
             PreemptionHighLastThreadId = 0;
             PreemptionCurrentExecutionThreadId = 0;
             PreemptionActiveTask = "대기 중";
+            InitializeLowWorkerYieldViewModels();
             UpdatePreemptionInspectorHighlight();
             PreemptionTrendMaxYield = 1;
             SetPreemptionHealth(
@@ -678,58 +727,174 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         demoScheduler.SchedulerError += (_, ex) =>
         {
-            _ = _dispatcher.BeginInvoke(() => AppendPreemptionLog($"Scheduler error: {ex.Message}"));
+            QueuePreemptionLog($"Scheduler error: {ex.Message}");
         };
+        demoScheduler.SnapshotChanged += OnPreemptionSchedulerSnapshotChanged;
+
+        RegisterLowWorker(demoScheduler, "Low Worker A", TimeSpan.FromMilliseconds(25), 95, 2);
+        RegisterLowWorker(demoScheduler, "Low Worker B", TimeSpan.FromMilliseconds(35), 120, 2);
+        RegisterLowWorker(demoScheduler, "Low Worker C", TimeSpan.FromMilliseconds(45), 150, 1);
 
         demoScheduler.Register(new ScheduledTask(
-            "Low Priority Worker",
+            "Normal Telemetry",
+            Enum_TaskPriority.Normal,
+            TimeSpan.FromMilliseconds(110),
+            Enum_TaskExecutionMode.Periodic,
+            async (_, cancellationToken) =>
+            {
+                Interlocked.Exchange(ref _preemptionNormalLastThreadIdCounter, Environment.CurrentManagedThreadId);
+                var count = Interlocked.Increment(ref _preemptionNormalRunCountCounter);
+                Interlocked.Exchange(ref _lastNormalRunTick, DateTime.UtcNow.Ticks);
+                QueuePreemptionLog($"Normal Telemetry(TID={Environment.CurrentManagedThreadId})가 Low 작업 사이에 끼어들었습니다. 누적 실행 횟수={count}");
+                await Task.Delay(8, cancellationToken).ConfigureAwait(false);
+            },
+            statusProvider: () => "Medium priority telemetry pulse"));
+
+        demoScheduler.Register(new ScheduledTask(
+            "High Priority Urgent",
+            Enum_TaskPriority.Critical,
+            TimeSpan.FromMilliseconds(180),
+            Enum_TaskExecutionMode.Periodic,
+            async (_, cancellationToken) =>
+            {
+                var startedTicks = DateTime.UtcNow.Ticks;
+                var previousStartedTicks = Interlocked.Exchange(ref _lastHighStartTick, startedTicks);
+                if (previousStartedTicks > 0)
+                {
+                    Interlocked.Exchange(ref _preemptionHighLastIntervalTicks, startedTicks - previousStartedTicks);
+                }
+
+                Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, Environment.CurrentManagedThreadId);
+                var count = Interlocked.Increment(ref _preemptionHighRunCountCounter);
+                Interlocked.Exchange(ref _lastHighRunTick, DateTime.UtcNow.Ticks);
+                var intervalText = previousStartedTicks > 0
+                    ? $", 이전 실행 후 {TimeSpan.FromTicks(startedTicks - previousStartedTicks).TotalMilliseconds:N0}ms"
+                    : string.Empty;
+                QueuePreemptionLog($"High Priority Urgent(TID={Environment.CurrentManagedThreadId})가 긴급 구간을 시작했습니다. 누적 실행 횟수={count}{intervalText}");
+
+                for (var burst = 1; burst <= 3; burst++)
+                {
+                    await Task.Delay(4, cancellationToken).ConfigureAwait(false);
+                    QueuePreemptionLog($"High Priority Urgent burst {burst}/3 완료");
+                }
+            },
+            statusProvider: () => "Critical burst work"));
+
+        _preemptionTestScheduler = demoScheduler;
+        demoScheduler.Start();
+    }
+
+    private void RegisterLowWorker(
+        SchedulerService scheduler,
+        string name,
+        TimeSpan period,
+        int workUnits,
+        int delayMilliseconds)
+    {
+        scheduler.Register(new ScheduledTask(
+            name,
             Enum_TaskPriority.Low,
-            TimeSpan.FromMilliseconds(30),
+            period,
             Enum_TaskExecutionMode.Periodic,
             async (context, cancellationToken) =>
             {
+                RecordLowWorkerResume(name);
                 Interlocked.Exchange(ref _preemptionLowLastThreadIdCounter, Environment.CurrentManagedThreadId);
                 Interlocked.Exchange(ref _lastLowWorkTick, DateTime.UtcNow.Ticks);
 
-                for (var i = 0; i < 120; i++)
+                for (var i = 0; i < workUnits; i++)
                 {
                     if (context.ShouldYield())
                     {
                         Interlocked.Increment(ref _preemptionYieldCountCounter);
                         Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
-                        await _dispatcher.InvokeAsync(() =>
-                            AppendPreemptionLog($"Low Priority Worker(TID={Environment.CurrentManagedThreadId})가 ShouldYield()=true를 감지해 양보했습니다. 다음 tick에서 High Priority Urgent가 먼저 실행됩니다.")).Task.ConfigureAwait(false);
+                        RecordLowWorkerYield(name);
+                        QueuePreemptionLog($"{name}(TID={Environment.CurrentManagedThreadId})가 더 높은 우선순위 task를 감지해 양보했습니다. 진행률={i + 1}/{workUnits}");
                         return;
                     }
 
                     Interlocked.Increment(ref _preemptionLowWorkUnitsCounter);
-                    await Task.Delay(2, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(delayMilliseconds, cancellationToken).ConfigureAwait(false);
                 }
 
-                await _dispatcher.InvokeAsync(() =>
-                    AppendPreemptionLog("Low Priority Worker가 작업 슬라이스 1회를 완료했습니다.")).Task.ConfigureAwait(false);
+                QueuePreemptionLog($"{name}가 긴 low-priority 작업 슬라이스 1회를 완료했습니다. workUnits={workUnits}");
             },
-            statusProvider: () => "Long-running low priority worker",
+            statusProvider: () => $"{workUnits} work units / {period.TotalMilliseconds:N0}ms period",
             overrunPolicy: Enum_TaskOverrunPolicy.FixedDelay));
+    }
 
-        demoScheduler.Register(new ScheduledTask(
-            "High Priority Urgent",
-            Enum_TaskPriority.Critical,
-            TimeSpan.FromMilliseconds(90),
-            Enum_TaskExecutionMode.Periodic,
-            (_, _) =>
+    private void ResetLowWorkerRuntimeStats()
+    {
+        _lowWorkerRuntimeStats.Clear();
+        foreach (var name in GetLowWorkerNames())
+        {
+            _lowWorkerRuntimeStats[name] = new LowWorkerRuntimeStats();
+        }
+    }
+
+    private void InitializeLowWorkerYieldViewModels()
+    {
+        _lowWorkerYieldViewModels.Clear();
+        PreemptionLowWorkerYields.Clear();
+
+        foreach (var name in GetLowWorkerNames())
+        {
+            var viewModel = new LowWorkerYieldStatsViewModel(name);
+            _lowWorkerYieldViewModels[name] = viewModel;
+            PreemptionLowWorkerYields.Add(viewModel);
+        }
+    }
+
+    private void RecordLowWorkerYield(string name)
+    {
+        var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
+        Interlocked.Increment(ref stats.YieldCount);
+        Interlocked.Exchange(ref stats.LastYieldUtcTicks, DateTime.UtcNow.Ticks);
+    }
+
+    private void RecordLowWorkerResume(string name)
+    {
+        var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
+        var yieldedAtTicks = Interlocked.Exchange(ref stats.LastYieldUtcTicks, 0);
+        if (yieldedAtTicks <= 0)
+        {
+            return;
+        }
+
+        var resumedAtTicks = DateTime.UtcNow.Ticks;
+        Interlocked.Exchange(ref stats.LastResumeDelayTicks, Math.Max(0, resumedAtTicks - yieldedAtTicks));
+        Interlocked.Exchange(ref stats.LastResumeUtcTicks, resumedAtTicks);
+    }
+
+    private void UpdateLowWorkerYieldStats()
+    {
+        foreach (var name in GetLowWorkerNames())
+        {
+            if (!_lowWorkerYieldViewModels.TryGetValue(name, out var viewModel))
             {
-                Interlocked.Exchange(ref _preemptionHighLastThreadIdCounter, Environment.CurrentManagedThreadId);
-                var count = Interlocked.Increment(ref _preemptionHighRunCountCounter);
-                Interlocked.Exchange(ref _lastHighRunTick, DateTime.UtcNow.Ticks);
-                _ = _dispatcher.BeginInvoke(() =>
-                    AppendPreemptionLog($"High Priority Urgent(TID={Environment.CurrentManagedThreadId}) 실행 완료. 누적 실행 횟수={count}"));
-                return Task.CompletedTask;
-            },
-            statusProvider: () => "Urgent high-priority work"));
+                continue;
+            }
 
-        _preemptionTestScheduler = demoScheduler;
-        demoScheduler.Start();
+            var stats = _lowWorkerRuntimeStats.GetOrAdd(name, _ => new LowWorkerRuntimeStats());
+            viewModel.Update(
+                Volatile.Read(ref stats.YieldCount),
+                Volatile.Read(ref stats.LastResumeDelayTicks));
+        }
+    }
+
+    private void UpdateHighInterval()
+    {
+        var intervalTicks = Volatile.Read(ref _preemptionHighLastIntervalTicks);
+        PreemptionHighLastInterval = intervalTicks <= 0
+            ? "-"
+            : $"{TimeSpan.FromTicks(intervalTicks).TotalMilliseconds:N0} ms";
+    }
+
+    private static IEnumerable<string> GetLowWorkerNames()
+    {
+        yield return "Low Worker A";
+        yield return "Low Worker B";
+        yield return "Low Worker C";
     }
 
     private async Task StopPreemptionTestAsync()
@@ -741,12 +906,15 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         {
             try
             {
+                demoScheduler.SnapshotChanged -= OnPreemptionSchedulerSnapshotChanged;
                 await demoScheduler.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
             }
             finally
             {
                 demoScheduler.Dispose();
             }
+
+            ClearPreemptionActiveTasks();
         }
 
         if (_isPreemptionTestRunning)
@@ -756,6 +924,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             if (_dispatcher.CheckAccess())
             {
                 _preemptionUiTimer.Stop();
+                DrainPreemptionLogs();
                 PreemptionTestState = "Stopped";
                 LastPreemptionEvent = "Preemption demo stopped.";
                 PreemptionCurrentExecutionThreadId = 0;
@@ -779,6 +948,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 await _dispatcher.InvokeAsync(() =>
                 {
                     _preemptionUiTimer.Stop();
+                    DrainPreemptionLogs();
                     PreemptionTestState = "Stopped";
                     LastPreemptionEvent = "Preemption demo stopped.";
                     PreemptionCurrentExecutionThreadId = 0;
@@ -803,11 +973,15 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
     private void OnPreemptionUiTimerTick(object? sender, EventArgs e)
     {
+        DrainPreemptionLogs();
+        ApplyLatestPreemptionSnapshot();
         PreemptionLowWorkUnits = Volatile.Read(ref _preemptionLowWorkUnitsCounter);
         PreemptionHighRunCount = Volatile.Read(ref _preemptionHighRunCountCounter);
         PreemptionYieldCount = Volatile.Read(ref _preemptionYieldCountCounter);
         PreemptionLowLastThreadId = Volatile.Read(ref _preemptionLowLastThreadIdCounter);
         PreemptionHighLastThreadId = Volatile.Read(ref _preemptionHighLastThreadIdCounter);
+        UpdateLowWorkerYieldStats();
+        UpdateHighInterval();
         UpdatePreemptionHealthStatus();
         UpdatePreemptionFlowStatus();
 
@@ -849,11 +1023,31 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     {
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
         LastPreemptionEvent = message;
-        PreemptionLogs.Add(line);
+        PreemptionLogs.Insert(0, line);
 
-        while (PreemptionLogs.Count > 200)
+        while (PreemptionLogs.Count > 100)
         {
-            PreemptionLogs.RemoveAt(0);
+            PreemptionLogs.RemoveAt(PreemptionLogs.Count - 1);
+        }
+    }
+
+    private void QueuePreemptionLog(string message)
+    {
+        _pendingPreemptionLogs.Enqueue(message);
+    }
+
+    private void ClearPendingPreemptionLogs()
+    {
+        while (_pendingPreemptionLogs.TryDequeue(out _))
+        {
+        }
+    }
+
+    private void DrainPreemptionLogs()
+    {
+        while (_pendingPreemptionLogs.TryDequeue(out var message))
+        {
+            AppendPreemptionLog(message);
         }
     }
 
@@ -933,6 +1127,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         var nowTicks = DateTime.UtcNow.Ticks;
         var lowRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastLowWorkTick), TimeSpan.FromMilliseconds(900));
         var yieldRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastYieldTick), TimeSpan.FromMilliseconds(900));
+        var normalRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastNormalRunTick), TimeSpan.FromMilliseconds(900));
         var highRecent = IsRecentTick(nowTicks, Volatile.Read(ref _lastHighRunTick), TimeSpan.FromMilliseconds(900));
 
         if (yieldRecent && highRecent)
@@ -960,6 +1155,20 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
                 lowStep: false,
                 yieldStep: false,
                 highStep: true);
+            return;
+        }
+
+        if (normalRecent)
+        {
+            PreemptionCurrentExecutionThreadId = Volatile.Read(ref _preemptionNormalLastThreadIdCounter);
+            PreemptionActiveTask = "NORMAL Telemetry";
+            UpdatePreemptionInspectorHighlight();
+            SetPreemptionFlow(
+                headline: "NORMAL 중간 우선순위 실행",
+                detail: "LOW 작업들이 Ready 상태여도 NORMAL Telemetry가 먼저 실행되며 우선순위 차이를 보여줍니다.",
+                lowStep: false,
+                yieldStep: true,
+                highStep: false);
             return;
         }
 
@@ -1042,6 +1251,43 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _dispatcher.BeginInvoke(ApplyLatestSnapshot, DispatcherPriority.Background);
     }
 
+    private void OnPreemptionSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
+    {
+        lock (_preemptionSnapshotSyncRoot)
+        {
+            _latestPreemptionSnapshot = snapshot;
+        }
+    }
+
+    private void ApplyLatestPreemptionSnapshot()
+    {
+        SchedulerSnapshot? snapshot;
+
+        lock (_preemptionSnapshotSyncRoot)
+        {
+            snapshot = _latestPreemptionSnapshot;
+            _latestPreemptionSnapshot = null;
+        }
+
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        foreach (var task in snapshot.Tasks)
+        {
+            if (_preemptionTaskViewModels.TryGetValue(task.Name, out var taskViewModel))
+            {
+                taskViewModel.Update(task);
+                continue;
+            }
+
+            _preemptionTaskViewModels[task.Name] = new ScheduledTaskStatusViewModel(task);
+        }
+
+        SyncActiveTasks(snapshot, _preemptionActiveTaskNames);
+    }
+
     private void ApplyLatestSnapshot()
     {
         SchedulerSnapshot? snapshot;
@@ -1074,7 +1320,64 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             Tasks.Add(taskViewModel);
         }
 
+        SyncActiveTasks(snapshot, _mainActiveTaskNames);
         RefreshCommandStates();
+    }
+
+    private void SyncActiveTasks(
+        SchedulerSnapshot snapshot,
+        HashSet<string> activeTaskNames)
+    {
+        activeTaskNames.Clear();
+
+        foreach (var task in snapshot.Tasks)
+        {
+            if (task.IsEnabled)
+            {
+                activeTaskNames.Add(task.Name);
+            }
+        }
+
+        RebuildActiveTasks();
+    }
+
+    private void ClearPreemptionActiveTasks()
+    {
+        lock (_preemptionSnapshotSyncRoot)
+        {
+            _latestPreemptionSnapshot = null;
+        }
+
+        _preemptionActiveTaskNames.Clear();
+        _preemptionTaskViewModels.Clear();
+
+        if (_dispatcher.CheckAccess())
+        {
+            RebuildActiveTasks();
+            return;
+        }
+
+        _dispatcher.InvokeAsync(RebuildActiveTasks);
+    }
+
+    private void RebuildActiveTasks()
+    {
+        ActiveTasks.Clear();
+        AddActiveTasks(_mainActiveTaskNames, _taskViewModels);
+        AddActiveTasks(_preemptionActiveTaskNames, _preemptionTaskViewModels);
+    }
+
+    private void AddActiveTasks(
+        IEnumerable<string> activeTaskNames,
+        IReadOnlyDictionary<string, ScheduledTaskStatusViewModel> taskViewModels)
+    {
+        foreach (var taskName in activeTaskNames)
+        {
+            if (taskViewModels.TryGetValue(taskName, out var taskViewModel))
+            {
+                ActiveTasks.Add(taskViewModel);
+            }
+        }
     }
 
     private void RefreshCommandStates()
@@ -1101,5 +1404,59 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         public string SecondLabel { get; }
         public int YieldCount { get; }
+    }
+
+    private sealed class LowWorkerRuntimeStats
+    {
+        public int YieldCount;
+        public long LastYieldUtcTicks;
+        public long LastResumeDelayTicks;
+        public long LastResumeUtcTicks;
+    }
+
+    internal sealed class LowWorkerYieldStatsViewModel : INotifyPropertyChanged
+    {
+        private int _yieldCount;
+        private string _lastResumeDelay = "-";
+
+        public LowWorkerYieldStatsViewModel(string name)
+        {
+            Name = name;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public string Name { get; }
+
+        public int YieldCount
+        {
+            get => _yieldCount;
+            private set => SetProperty(ref _yieldCount, value, nameof(YieldCount));
+        }
+
+        public string LastResumeDelay
+        {
+            get => _lastResumeDelay;
+            private set => SetProperty(ref _lastResumeDelay, value, nameof(LastResumeDelay));
+        }
+
+        public void Update(int yieldCount, long lastResumeDelayTicks)
+        {
+            YieldCount = yieldCount;
+            LastResumeDelay = lastResumeDelayTicks <= 0
+                ? "-"
+                : $"{TimeSpan.FromTicks(lastResumeDelayTicks).TotalMilliseconds:N0} ms";
+        }
+
+        private void SetProperty<T>(ref T field, T value, string propertyName)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return;
+            }
+
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
     }
 }
