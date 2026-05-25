@@ -1,5 +1,162 @@
 # Scheduling Progress
 
+## 2026-05-24 Preemption Log Throttling / UI Bottleneck Mitigation
+
+사용자 이슈:
+
+1. 선점 데모 탭 로그가 너무 자주 갱신되어 간헐적으로 화면이 끊겨 보임
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+   - 선점 로그 UI 반영을 80ms tick마다 즉시 갱신하던 방식에서 **1초 배치 누적 반영**으로 변경
+   - 로그 갱신을 전체 Clear/Add 대신, 기존 헤드 기준으로 신규 항목만 `Insert(0, ...)` 하는 증분 반영으로 변경
+   - 로그 표시 수 상한(100)을 별도 trim으로 유지
+   - `OnPreemptionSchedulerSnapshotChanged`에서 Dispatcher `BeginInvoke`를 매 스냅샷마다 쌓지 않도록 코얼레싱 플래그(`_isPreemptionSnapshotApplyQueued`) 추가
+
+2. `WpfSamples/MainWindow.xaml`
+   - 선점 로그 `ListBox`에 가상화 옵션 적용
+     - `VirtualizingPanel.IsVirtualizing=True`
+     - `VirtualizingPanel.VirtualizationMode=Recycling`
+     - `ScrollViewer.CanContentScroll=True`
+
+검증:
+
+- `dotnet build WpfSamples\WpfSamples.sln` 성공
+- `dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj` 3/3 통과
+
+## 2026-05-24 Update
+
+- Moved sample RTOS tasks into `Wpf.Lib.RTOS/Tasks/SampleTasks.cs`.
+- Added `Wpf.Lib.RTOS/Tasks/PreemptionDemo.cs`; WPF now starts/stops the library demo and renders snapshots only.
+- Moved dining philosophers demo into `Wpf.Lib.RTOS/Tasks/DiningPhilosophersDemo.cs`; WPF renders philosopher/fork/log snapshots and includes its scheduler tasks in the RTOS monitor active-task list.
+- Dining philosophers now releases the first fork immediately if the second fork is unavailable, so "held fork" visualization represents actual eating resource ownership instead of one-sided waiting.
+- Added `SchedulerService.GetSnapshot()` so demos and UI can read task state from the RTOS library.
+- Validation: `dotnet build WpfSamples\WpfSamples.sln` passed with 0 warnings, 0 errors; `dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj` passed 3/3 tests.
+
+## 2026-05-24 Architecture Alignment Update
+
+- Added `Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs`.
+- `SchedulerMonitorDemo` now owns `SchedulerService` lifecycle and sample task registration (`CounterTask`, `ClockTask`, `UiRefreshTask`) inside the RTOS library.
+- `WpfSamples/MainWindowViewModel.cs` no longer directly registers/owns monitor tasks or scheduler lifecycle for RTOS Monitor tab.
+- WPF now subscribes to `SchedulerMonitorDemo.SnapshotChanged` and renders snapshot data only, matching the same pattern already used by preemption and dining demos.
+- Validation: `dotnet build WpfSamples\WpfSamples.sln` passed with 0 warnings, 0 errors.
+
+## 2026-05-24 Documentation Alignment Update
+
+- Updated architecture docs to match current ownership model:
+   - RTOS library owns monitor/preemption/dining demo execution lifecycle.
+   - WpfSamples is responsible for demo command wiring and snapshot rendering.
+- Updated files:
+   - `README.md`
+   - `Docs/RTOS_Beginner_Quick_Start.md`
+   - `Docs/RTOS_Beginner_Complete_Guide.md`
+   - `Docs/RTOS_File_Guide.md`
+   - `Docs/RTOS_Junior_Code_Maintenance_Guide.md`
+   - `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+   - `Docs/RTOS_Overview.md`
+   - `Docs/RTOS_Primitives_Deep_Dive.md`
+   - `Docs/SchedulerService_Flow.md`
+   - `Docs/Samples_RTOS_Guide.md` (rewritten)
+
+## 2026-05-24 Documentation Terminology Unification
+
+- Unified documentation terminology to reduce ambiguity across architecture descriptions.
+- Standardized key terms:
+   - `실행 주체`
+   - `표시 계층`
+   - `스냅샷 상태 반영`
+   - `데모 조합`
+- Added terminology baseline section in `README.md` and aligned related phrasing in beginner/maintenance/sample guides.
+
+## 2026-05-24 Documentation Terminology Unification (Headings)
+
+- Normalized heading-level wording for consistency across docs.
+- Applied changes:
+   - `Tasks 연동 설명` -> `데모 조합 연동 설명`
+   - `Snapshot 반영 흐름` -> `스냅샷 상태 반영 흐름`
+   - UI 중심 표현 일부를 `표시 계층` 용어로 통일
+- Updated files:
+   - `Docs/Samples_RTOS_Guide.md`
+   - `Docs/RTOS_Beginner_Complete_Guide.md`
+   - `Docs/RTOS_Beginner_Quick_Start.md`
+   - `Docs/RTOS_Junior_Code_Maintenance_Guide.md`
+   - `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+
+## 2026-05-24 Runtime Hardening Update
+
+- 목적: 라이브러리 데모가 task까지 포함한 최신 구조에서 정지/이벤트 경로의 안정성 강화.
+
+수정 내용:
+
+1. `Wpf.Lib.RTOS/Tasks/SchedulerMonitorDemo.cs`
+   - `StopAsync` 반환형을 `Task<bool>`로 변경해 정지 타임아웃 결과를 상위로 전달.
+   - dispose 상태 전이를 lock으로 보호해 경쟁 조건 완화.
+   - snapshot 이벤트 호출에 핸들러별 예외 격리 적용.
+
+2. `Wpf.Lib.RTOS/Tasks/PreemptionDemo.cs`
+   - `Start()`의 동기 stop 대기 제거(이미 실행 중이면 return).
+   - `StopAsync` 반환형을 `Task<bool>`로 변경하고 타임아웃 실패 시 상태를 강제로 끄지 않도록 보완.
+   - scheduler/snapshot 이벤트 호출에 핸들러별 예외 격리 적용.
+
+3. `Wpf.Lib.RTOS/Tasks/DiningPhilosophersDemo.cs`
+   - `StopAsync` 반환형을 `Task<bool>`로 변경하고 타임아웃 실패 시 상태 불일치 방지.
+   - scheduler/snapshot 이벤트 호출에 핸들러별 예외 격리 적용.
+
+4. `WpfSamples/MainWindowViewModel.cs`
+   - 데모 stop 결과(`bool`)를 확인해 실패 시 UI 상태를 강제 중지로 바꾸지 않도록 반영.
+
+검증:
+
+- `dotnet build WpfSamples\WpfSamples.sln` 성공
+- `dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj` 3/3 통과
+
+## 2026-05-24 Preemption UI / Dining Concurrency Update
+
+사용자 이슈:
+
+1. 선점 화면이 간헐적으로 끊김
+2. 철학자의 식사가 1명씩 순차적으로 보이는 경향
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+    - 선점 스냅샷 중복 반영 경로 제거:
+       - `PreemptionDemo.SnapshotChanged` 직접 적용 구독을 제거하고 UI 타이머 경로로 일원화
+    - 선점 UI 타이머 주기를 30ms -> 80ms로 조정
+    - `PreemptionLogs`, `PreemptionYieldTrend`, `PreemptionLowWorkerYields`를
+       매 tick 무조건 Clear/Add 하지 않고 변경분이 있을 때만 갱신하도록 최적화
+    - `ApplyPreemptionSnapshot`에서 매번 `RefreshCommandStates()` 호출 제거
+
+2. `Wpf.Lib.RTOS/Tasks/DiningPhilosophersDemo.cs`
+    - waiter 세마포어 용량을 2 -> `PhilosopherCount - 1`로 조정(현재 4)
+    - 철학자 태스크 주기를 동일 50ms 고정에서 index 기반 분산 주기(45ms + index*7ms)로 변경
+    - 목적: 실행 순서 고정 편향을 줄이고, 비인접 철학자의 동시 식사 기회를 늘림
+
+검증:
+
+- `dotnet build WpfSamples\WpfSamples.sln` 성공
+- `dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj` 3/3 통과
+
+## 2026-05-24 Dining Concurrent Eating Indicator Update
+
+사용자 요청에 따라 철학자 탭에서 동시 식사 상태를 즉시 확인할 수 있는 지표를 추가했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+   - `DiningConcurrentEatingStatus` 속성 추가
+   - snapshot에서 현재 식사 인원/세션 최대 식사 인원을 계산
+   - 표시 포맷: `동시 식사: X명 (최대 Y명)`
+
+2. `WpfSamples/MainWindow.xaml`
+   - 철학자 탭 상단 정보 영역에 동시 식사 지표 TextBlock 추가
+
+검증:
+
+- `dotnet build WpfSamples\WpfSamples.sln` 성공
+- `dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj` 3/3 통과
+
 ## Goal
 
 현재 WPF 샘플 프로젝트에서 RTOS처럼 태스크를 주기적으로 실행하고, WPF 커스텀 컨트롤 예제들을 여러 개 동작시킬 수 있는 샘플 프로그램의 기본 스케줄링 구조를 만든다.
@@ -476,6 +633,174 @@ dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj -- --all
 비고:
 
 - 문서성 변경이라 별도 빌드는 생략했다.
+
+## 2026-05-23 Intermittent UI Stutter Mitigation (Post-Preemption Change)
+
+사용자 보고("선점 코드 변경 이후 UI가 간헐적으로 끊김")에 따라
+preemption 경로를 점검하고, UI 응답성 저하를 유발하는 병목을 완화했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+   - preemption 로그 큐에 백프레셔 추가
+   - pending 로그 상한(`MaxPendingPreemptionLogs`) 도입
+   - UI tick당 로그 배출량 제한(`MaxPreemptionLogsDrainPerTick`) 적용
+   - 과다 로그는 누적 후 "생략 건수"로 요약 표시
+   - 효과: 한 tick에서 과도한 `ObservableCollection.Insert(0, ...)` 연산으로 UI가 멈추는 현상 완화
+
+2. `Wpf.Lib.RTOS/SchedulerService.cs`
+   - `ShouldYieldToHigherPriorityTask`에서 매 호출마다 candidate 리스트를 새로 복사하던 할당 제거
+   - `_tasks` 직접 순회로 GC pressure 감소
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj -- --tests SchedulerCooperativePreemptionYieldsToHigherPriorityAsync,SchedulerPreemptedTaskResumesImmediatelyAsync,SchedulerTimeQuantumPreemptsLongTaskAsync
+```
+
+결과:
+
+- 솔루션 빌드 성공
+
+## 2026-05-23 Preemption Bottom Log 1s Aggregation
+
+사용자 요청("선점 데모 하단 로그가 너무 자주 출력되어 UI 끊김 가능")에 맞춰
+로그 출력 방식을 건별 갱신에서 1초 누적 요약 갱신으로 변경했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+   - `DrainPreemptionLogs(force = false)`로 확장
+   - 기본 동작: 1초마다 pending 로그를 모아 요약 1건만 `PreemptionLogs`에 추가
+   - 정지 동작: `force: true`로 즉시 flush
+   - 요약 예: "1초 요약: 신규 이벤트 N건, 생략 M건 / 최근: ..."
+
+2. UI 병목 점검 결과
+   - 고빈도 ListBox Insert(하단 로그)가 주요 체감 병목으로 판단
+   - ActiveTasks 재구성은 이미 변경 감지 후 재구성하도록 최적화되어 있음
+
+3. 문서 반영
+   - `Docs/RTOS_Junior_Code_Maintenance_Guide.md`
+   - `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+   - 로그 1초 배치 요약 전략과 병목 점검 포인트 추가
+
+## 2026-05-23 State Semantics Documentation Expansion
+
+사용자 요청("Blocked/Ready 상태 설명을 매뉴얼에 명확히 추가")에 맞춰
+상태 정의/전이표/해석 가이드를 문서에 보강했다.
+
+반영 문서:
+
+1. `Docs/RTOS_Beginner_Complete_Guide.md`
+   - `Ready/Blocked/Running/Suspended` 정의 추가
+   - 상태 전이표(조건 -> 다음 상태) 추가
+   - RTOS Monitor와 선점 데모에서 상태가 다르게 보이는 이유 추가
+
+2. `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+   - 재구현 관점 상태 의미 고정 섹션 추가
+   - 상태 전이표 및 실무 체크 포인트 추가
+
+비고:
+
+- 문서성 변경이라 별도 빌드는 생략했다.
+
+## 2026-05-23 Starvation Sensitivity UI + Documentation Expansion
+
+사용자 요청("기아 판정 민감도 조절 기능 추가 + 설명서 상세 반영")에 맞춰
+선점 데모 UI와 문서를 함께 보강했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+   - `PreemptionStarvationLowStallSeconds` (1~8초) 속성 추가
+   - `PreemptionStarvationLowStallLabel` 표시 문자열 추가
+   - 기아 판정 로직의 LOW 정체 임계값(기존 고정 3초)을 설정값으로 대체
+
+2. `WpfSamples/MainWindow.xaml`
+   - 선점 데모 상단에 "기아 감지 민감도" 슬라이더 추가
+   - 현재 임계값(초)을 라벨로 실시간 표시
+
+3. 문서 보강
+   - `Docs/RTOS_Junior_Code_Maintenance_Guide.md`
+     - 로그 누적 출력, ActiveTasks 재구성 최적화, 기아 민감도 튜닝 가이드 추가
+   - `Docs/RTOS_Scheduler_Implementation_Manual_For_Juniors.md`
+     - 기아 경고 설계 근거(RunCount/LastStartedAt)와 UI 끊김 방지 원칙 추가
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+결과:
+
+- 솔루션 빌드 성공
+
+## 2026-05-23 Preemption Starvation Warning Added
+
+사용자 요청("LOW 기아 여부를 RunCount/LastStartedAt 기준으로 자동 판정")에 맞춰
+선점 데모에 기아 경고 표시를 추가했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs`
+    - preemption snapshot 기반 기아 판정 로직 추가 (`UpdatePreemptionStarvationSignal`)
+    - 판정 근거:
+       - LOW RunCount 증가 정체
+       - LOW LastStartedAt 갱신 정체
+       - HIGH/Normal 진행이 최근에도 지속
+       - 상위 우선순위 task가 Ready/Running 상태 유지
+    - UI 바인딩용 상태 추가:
+       - `PreemptionStarvationStatus`
+       - `PreemptionStarvationForeground`
+    - health 상태 갱신에서 starvation 감지 시 `주의`로 우선 표기
+
+2. `WpfSamples/MainWindow.xaml`
+    - 선점 데모 패널에 "기아 감지" 상태 문구 라인 추가
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+결과:
+
+- 솔루션 빌드 성공
+- 선점 핵심 회귀 테스트 3/3 통과
+
+## 2026-05-23 Additional Log Frequency Reduction + UI Refresh Guard
+
+사용자 요청("로그 빈도를 더 줄이고, UI 갱신 끊김 가능 구간 확인")에 맞춰
+preemption 로그/갱신 경로를 추가 최적화했다.
+
+수정 내용:
+
+1. `WpfSamples/MainWindowViewModel.cs` 로그 정책 변경
+    - 건별 로그 중심에서 "누적 N회마다 1회 요약" 방식으로 전환
+    - `QueuePreemptionLogEvery(key, every, message)` 추가
+    - 적용 예:
+       - Normal Telemetry: 5회마다 1회
+       - High Urgent 시작: 3회마다 1회
+       - Low Worker 양보: worker별 4회마다 1회
+       - Low Worker 완료: worker별 2회마다 1회
+    - burst 단계 로그는 세부 건별 출력 대신 누적 요약 출력으로 축소
+
+2. UI 갱신 경로 최적화
+    - `SyncActiveTasks`에서 활성 태스크 집합이 이전과 동일하면
+       `RebuildActiveTasks()`를 호출하지 않도록 변경
+    - 효과: snapshot 주기마다 `ActiveTasks.Clear()/Add(...)`가 반복되던 불필요 갱신 감소
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+```
+
+결과:
+
+- 솔루션 빌드 성공
 
 ## 2026-05-23 Junior Hands-on Labs Package Added
 
@@ -1203,3 +1528,124 @@ dotnet build WpfSamples\WpfSamples.sln
 ```
 
 빌드 결과: 경고 0개, 오류 0개.
+## 2026-05-23 Dining Philosophers Demo Update
+
+WPF 샘플 UI에 `철학자의 식사` 탭을 추가했다.
+
+추가 내용:
+
+1. 5명의 철학자 상태 카드
+   - 생각 중
+   - 배고픔
+   - 식사 중
+   - 식사 횟수
+   - 대기 횟수
+   - 왼쪽/오른쪽 포크 확보 상태
+
+2. 5개 포크 점유 상태 표시
+   - 사용 가능
+   - 사용 중
+   - 현재 소유 철학자
+
+3. RTOS semaphore 기반 동작
+   - 포크는 `RtosSemaphore(1, 1)`로 표현했다.
+   - deadlock 방지를 위해 waiter 역할의 `RtosSemaphore(4, 4)`를 추가했다.
+   - 동시에 포크 획득을 시도하는 철학자를 4명으로 제한해 원형 대기 상태를 피한다.
+
+4. UI 제어
+   - 시작
+   - 중지
+   - 초기화
+   - 경과 시간
+   - 요약 상태
+   - 실시간 이벤트 로그
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj
+```
+
+결과:
+
+```text
+build: 경고 0개, 오류 0개
+tests: 3/3 passed
+```
+
+## 2026-05-23 Dining Philosophers Monitor/Fairness Update
+
+철학자의 식사 데모를 RTOS Monitor 하단의 전체 Task 목록에도 표시되도록 보정했다.
+
+변경 내용:
+
+1. Dining philosopher 5명을 monitor용 task snapshot으로 변환
+   - `Dining 철학자 1` ~ `Dining 철학자 5`
+   - 상태와 상세 진행 상황을 `Status`로 표시
+   - 식사 횟수를 `Runs`로 표시
+
+2. 대기 횟수 의미 수정
+   - 기존: semaphore 재시도 timeout마다 누적되어 특정 철학자만 크게 튈 수 있었다.
+   - 변경: 배고픔/대기 구간에 진입한 횟수로 1회만 누적한다.
+
+3. 포크 점유 상한 조정
+   - 기존 waiter semaphore: `RtosSemaphore(4, 4)`
+   - 변경 waiter semaphore: `RtosSemaphore(2, 2)`
+   - 동시에 식사를 준비하는 철학자를 2명으로 제한해 포크 5개가 모두 점유된 것처럼 보이는 상태를 줄이고, 일반적으로 2명이 식사하면 포크 4개가 사용 중으로 보이게 했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj
+```
+
+결과:
+
+```text
+build: 경고 0개, 오류 0개
+tests: 3/3 passed
+```
+
+## 2026-05-23 RTOS Library Demo Ownership Update
+
+철학자의 식사 데모와 기본 샘플 task의 실행 책임을 `Wpf.Lib.RTOS`로 이동했다.
+
+변경 내용:
+
+1. `Wpf.Lib.RTOS/DiningPhilosophersDemo.cs`
+   - 내부에서 `SchedulerService`를 사용한다.
+   - 철학자 5명은 각각 `SchedulerTaskBase` 기반 task로 등록된다.
+   - 포크는 `RtosSemaphore(1, 1)`로 관리한다.
+   - waiter는 `RtosSemaphore(2, 2)`로 관리한다.
+   - UI용 상태는 `DiningPhilosophersSnapshot`으로 제공한다.
+   - RTOS Monitor용 task 상태는 내부 scheduler의 `SchedulerSnapshotChanged` 이벤트로 제공한다.
+
+2. `Wpf.Lib.RTOS/SampleTasks.cs`
+   - `CounterTask`
+   - `ClockTask`
+   - `UiRefreshTask`
+   - 기존 WPF 샘플 프로젝트의 task 구현을 라이브러리로 이동했다.
+
+3. `WpfSamples`
+   - 철학자의 식사 동작을 직접 실행하지 않는다.
+   - 라이브러리 snapshot을 받아 UI 컬렉션에 표시한다.
+   - RTOS Monitor 하단 task 목록도 라이브러리 scheduler snapshot에서 받은 task 상태를 표시한다.
+
+4. `SchedulerService.GetSnapshot()`
+   - 현재 등록된 task 목록과 실행 상태를 라이브러리에서 직접 조회할 수 있도록 공개 API를 추가했다.
+
+검증:
+
+```text
+dotnet build WpfSamples\WpfSamples.sln
+dotnet run --project WpfSamples.Tests.Cli\WpfSamples.Tests.Cli.csproj
+```
+
+결과:
+
+```text
+build: 경고 0개, 오류 0개
+tests: 3/3 passed
+```

@@ -12,6 +12,8 @@ namespace WpfSamples;
 
 internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable, IAsyncDisposable
 {
+    private static readonly TimeSpan PreemptionLogFlushInterval = TimeSpan.FromSeconds(1);
+    private const int PreemptionLogDisplayLimit = 100;
     private static readonly Brush HealthStoppedBackground = new SolidColorBrush(Color.FromRgb(229, 231, 235));
     private static readonly Brush HealthStoppedForeground = new SolidColorBrush(Color.FromRgb(55, 65, 81));
     private static readonly Brush HealthGoodBackground = new SolidColorBrush(Color.FromRgb(220, 252, 231));
@@ -59,6 +61,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private SchedulerSnapshot? _latestSnapshot;
     private SchedulerSnapshot? _latestPreemptionSnapshot;
     private bool _isSnapshotApplyQueued;
+    private bool _isPreemptionSnapshotApplyQueued;
     private bool _isRunningTests;
     private bool _isPreemptionTestRunning;
     private bool _isDiningRunning;
@@ -102,6 +105,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private Brush _preemptionHighInspectorBorder = InspectorIdleBorder;
     private Brush _preemptionCurrentInspectorBackground = InspectorIdleBackground;
     private Brush _preemptionCurrentInspectorBorder = InspectorIdleBorder;
+    private DateTimeOffset _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
 
     public MainWindowViewModel()
     {
@@ -1008,7 +1012,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         };
     }
 
-    private void ApplyPreemptionSnapshot(PreemptionDemoSnapshot snapshot)
+    private void ApplyPreemptionSnapshot(PreemptionDemoSnapshot snapshot, bool forceLogSync = false)
     {
         _isPreemptionTestRunning = snapshot.IsRunning;
         PreemptionTestState = snapshot.State;
@@ -1042,37 +1046,81 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         PreemptionHighStepBrush = snapshot.HighStep ? FlowActiveBrush : FlowIdleBrush;
         UpdatePreemptionInspectorHighlight();
 
-        SyncPreemptionLogs(snapshot.Logs);
+        SyncPreemptionLogs(snapshot.Logs, force: forceLogSync);
         SyncPreemptionYieldTrend(snapshot.YieldTrend);
 
         PreemptionTrendMaxYield = snapshot.TrendMaxYield;
         SyncLowWorkerYieldViewModels(snapshot.LowWorkerYields);
     }
 
-    private void SyncPreemptionLogs(IReadOnlyList<string> logs)
+    private void SyncPreemptionLogs(IReadOnlyList<string> logs, bool force)
     {
-        if (PreemptionLogs.Count == logs.Count)
+        var now = DateTimeOffset.Now;
+        if (!force && now - _lastPreemptionLogFlushAt < PreemptionLogFlushInterval)
         {
-            var same = true;
-            for (var i = 0; i < logs.Count; i++)
+            return;
+        }
+
+        _lastPreemptionLogFlushAt = now;
+
+        if (logs.Count == 0)
+        {
+            if (PreemptionLogs.Count > 0)
             {
-                if (!string.Equals(PreemptionLogs[i], logs[i], StringComparison.Ordinal))
-                {
-                    same = false;
-                    break;
-                }
+                PreemptionLogs.Clear();
             }
 
-            if (same)
+            return;
+        }
+
+        if (PreemptionLogs.Count == 0)
+        {
+            foreach (var log in logs)
             {
-                return;
+                PreemptionLogs.Add(log);
+            }
+
+            TrimPreemptionLogs();
+            return;
+        }
+
+        var currentHead = PreemptionLogs[0];
+        var headIndexInSnapshot = -1;
+
+        for (var i = 0; i < logs.Count; i++)
+        {
+            if (string.Equals(logs[i], currentHead, StringComparison.Ordinal))
+            {
+                headIndexInSnapshot = i;
+                break;
             }
         }
 
-        PreemptionLogs.Clear();
-        foreach (var log in logs)
+        if (headIndexInSnapshot < 0)
         {
-            PreemptionLogs.Add(log);
+            PreemptionLogs.Clear();
+            foreach (var log in logs)
+            {
+                PreemptionLogs.Add(log);
+            }
+
+            TrimPreemptionLogs();
+            return;
+        }
+
+        for (var i = headIndexInSnapshot - 1; i >= 0; i--)
+        {
+            PreemptionLogs.Insert(0, logs[i]);
+        }
+
+        TrimPreemptionLogs();
+    }
+
+    private void TrimPreemptionLogs()
+    {
+        while (PreemptionLogs.Count > PreemptionLogDisplayLimit)
+        {
+            PreemptionLogs.RemoveAt(PreemptionLogs.Count - 1);
         }
     }
 
@@ -1157,10 +1205,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         _preemptionDemo.Start();
         _isPreemptionTestRunning = true;
+        _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
 
         await _dispatcher.InvokeAsync(() =>
         {
-            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
+            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot, forceLogSync: true);
             _preemptionUiTimer.Start();
             RefreshCommandStates();
         });
@@ -1180,11 +1229,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
 
         _isPreemptionTestRunning = false;
+        _lastPreemptionLogFlushAt = DateTimeOffset.MinValue;
 
         await _dispatcher.InvokeAsync(() =>
         {
             _preemptionUiTimer.Stop();
-            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
+            ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot, forceLogSync: true);
             ClearPreemptionActiveTasks();
             RefreshCommandStates();
         });
@@ -1234,6 +1284,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         lock (_preemptionSnapshotSyncRoot)
         {
             _latestPreemptionSnapshot = snapshot;
+
+            if (_isPreemptionSnapshotApplyQueued)
+            {
+                return;
+            }
+
+            _isPreemptionSnapshotApplyQueued = true;
         }
 
         _dispatcher.BeginInvoke(ApplyLatestPreemptionSnapshot, DispatcherPriority.Background);
@@ -1247,6 +1304,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         {
             snapshot = _latestPreemptionSnapshot;
             _latestPreemptionSnapshot = null;
+            _isPreemptionSnapshotApplyQueued = false;
         }
 
         if (snapshot is null)
@@ -1340,6 +1398,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         lock (_preemptionSnapshotSyncRoot)
         {
             _latestPreemptionSnapshot = null;
+            _isPreemptionSnapshotApplyQueued = false;
         }
 
         _preemptionActiveTaskNames.Clear();
