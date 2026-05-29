@@ -16,7 +16,7 @@
 
             </Button>
             <TextBlock FontSize="12" Text="{Binding Tb_SelectedFolderPath}" TextWrapping="Wrap" Margin="5" />
-            <Button x:Name="Btn_Action" Content="폴더위치 활성화" Margin="5" Command="{Binding Btn_ActionCMD}">
+            <Button x:Name="Btn_Action" Content="폴더모니터링 활성화" Margin="5" Command="{Binding Btn_ActionCMD}">
 
             </Button>
         </StackPanel>
@@ -25,11 +25,36 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,394" Grid.RowSpan="2">
-                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5">
-                    <Run Text="Selected Folder: "/><Run x:Name="tb_SelectedFolder" FontWeight="Bold" Text="{Binding Tb_SelectedFolder}"/>
+            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left">
+                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightGreen">
+                    <Run Text="Activated Folder: "/><Run x:Name="tb_ActFolder" FontWeight="Bold" Text="{Binding Tb_ActivatedFolder}"/>
                 </TextBlock>
             </StackPanel>
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Vertical" HorizontalAlignment="Left">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightCyan">
+                    <Run Text="Monitoring Interval: "/><Run x:Name="tb_MonitoringInterval" FontWeight="Bold" Text="{Binding Tb_MonitoringInterval}"/>
+                    </TextBlock>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Vertical" HorizontalAlignment="Left">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightSalmon">
+                    <Run Text="Folder Size: "/><Run x:Name="tb_FolderSize" FontWeight="Bold" Text="{Binding Tb_FolderSize}"/>
+                    </TextBlock>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Left">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightYellow">
+                    <Run Text="Subfolder Count: "/><Run x:Name="tb_SubFolderCount" FontWeight="Bold" Text="{Binding Tb_SubFolderCount}"/>
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
 
         </Grid>
     </Grid>
