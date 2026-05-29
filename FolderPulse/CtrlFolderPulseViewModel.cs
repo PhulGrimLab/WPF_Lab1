@@ -4,8 +4,16 @@ using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace FolderPulse
 {
-    public class CtrlFolderPulseViewModel : ViewModelBase
+    public class CtrlFolderPulseViewModel : ViewModelBase, IDisposable
     {
+        // 중앙 타이머 - 설정한 인터벌에 맞춰서 UI 갱신을 주로 수행함.
+        private readonly TimeSpan _pollInterval;
+        private CancellationTokenSource? _cts = new CancellationTokenSource();
+
+        private double _interval = 0;
+
+        private bool _disposed = false;
+
         private string _tb_SelectedFolderPath = string.Empty;
         public string Tb_SelectedFolderPath
         {
@@ -49,6 +57,45 @@ namespace FolderPulse
         {
             Btn_ExplorerCMD = new RelayCommand(ExecuteExplorerCMD);
             Btn_ActionCMD = new RelayCommand(ExecuteActionCMD);
+
+            _pollInterval = TimeSpan.FromSeconds(_interval);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+
+            if (disposing)
+            {
+                // 현재 _cts를 로컬 변수로 가져오고, 필드를 null로 변경
+                var cts = _cts;
+                _cts = null;
+
+                if (cts != null)
+                {
+                    try
+                    {
+                        // 대기 중인 작업을 취소 시도
+                        cts.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // 이미 Dispose된 상태라면 무시
+                    }
+                    finally
+                    {
+                        // 반드시 Dispose 호출
+                        cts.Dispose();
+                    }
+                }
+            }
+            _disposed = true;
         }
 
         private void ExecuteActionCMD(object? parameter)
