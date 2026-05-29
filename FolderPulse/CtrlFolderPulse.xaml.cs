@@ -23,6 +23,7 @@ namespace FolderPulse
         public CtrlFolderPulse()
         {
             InitializeComponent();
+            this.DataContext = new CtrlFolderPulseViewModel();
         }
     }
 }

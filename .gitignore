@@ -9,6 +9,7 @@ dist/
 .vs/
 obj/
 bin/
+.vscode/
 
 # Compiled Java class files
 *.class
