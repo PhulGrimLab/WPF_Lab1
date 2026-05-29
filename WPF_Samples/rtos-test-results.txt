@@ -1,0 +1,48 @@
+Summary: 45/45 passed
+GeneratedAt: 2026-05-23T22:15:46.0512746+09:00
+
+[PASS] Semaphore wait/release (49.14 ms) - OK
+[PASS] Semaphore rejects over-release (0.56 ms) - OK
+[PASS] Semaphore wait observes cancellation (50.63 ms) - OK
+[PASS] Semaphore throws after dispose (1.22 ms) - OK
+[PASS] MessageQueue send/receive (36.22 ms) - OK
+[PASS] MessageQueue preserves FIFO order (1.91 ms) - OK
+[PASS] MessageQueue receive timeout (27.10 ms) - OK
+[PASS] MessageQueue throws after dispose (1.67 ms) - OK
+[PASS] EventFlags wait-any completes when flag is set (7.97 ms) - OK
+[PASS] EventFlags wait-all waits for all flags (1.11 ms) - OK
+[PASS] EventFlags wait observes timeout (34.09 ms) - OK
+[PASS] EventFlags wait observes cancellation (30.38 ms) - OK
+[PASS] EventFlags dispose cancels pending wait (1.91 ms) - OK
+[PASS] EventFlags registration failure does not leak waiter (1.65 ms) - OK
+[PASS] Mutex tracks owner and priority inheritance (35.92 ms) - OK
+[PASS] Mutex rejects reentrant owner (1.08 ms) - OK
+[PASS] Mutex throws after dispose (0.85 ms) - OK
+[PASS] SoftwareTimer one-shot fires once (91.21 ms) - OK
+[PASS] SoftwareTimer periodic fires repeatedly (85.83 ms) - OK
+[PASS] SoftwareTimer periodic survives callback errors (81.16 ms) - OK
+[PASS] SoftwareTimer dispose does not throw while callback runs (150.64 ms) - OK
+[PASS] SoftwareTimer rejects start after dispose (1.77 ms) - OK
+[PASS] SoftwareTimer stop-start race avoids overlapping runs (48.54 ms) - OK
+[PASS] TickCounter converts time to ticks (3.96 ms) - OK
+[PASS] TickCounter rejects overflow tick (0.39 ms) - OK
+[PASS] Scheduler executes periodic task (81.97 ms) - OK
+[PASS] Scheduler runs higher priority task first (3.65 ms) - OK
+[PASS] Scheduler cooperative preemption yields to higher priority (59.33 ms) - OK
+[PASS] Scheduler preempted task resumes immediately (1,401.11 ms) - OK
+[PASS] Scheduler time quantum preempts long task (48.39 ms) - OK
+[PASS] Scheduler executes one-shot task once (83.23 ms) - OK
+[PASS] Scheduler stop timeout returns false (218.21 ms) - OK
+[PASS] Scheduler self stop with infinite timeout returns false (1.54 ms) - OK
+[PASS] Scheduler stop honors cancellation (29.36 ms) - OK
+[PASS] Scheduler unregister prevents future execution (118.31 ms) - OK
+[PASS] Scheduler clear removes all tasks (132.22 ms) - OK
+[PASS] Scheduler reports task errors (2.26 ms) - OK
+[PASS] Scheduler survives snapshot handler errors (2.01 ms) - OK
+[PASS] Scheduler records trace entries (45.47 ms) - OK
+[PASS] Scheduler snapshot contains runtime statistics (84.15 ms) - OK
+[PASS] Scheduler overrun task does not overlap (164.37 ms) - OK
+[PASS] Scheduler fixed-delay overrun waits after completion (68.63 ms) - OK
+[PASS] Scheduler skip-missed overrun advances schedule (101.24 ms) - OK
+[PASS] Scheduler snapshot contains task state (83.18 ms) - OK
+[PASS] Scheduler snapshot survives faulty task properties (1.30 ms) - OK
