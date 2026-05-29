@@ -9,4 +9,12 @@
     <Platforms>x64</Platforms>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="WindowsAPICodePack" Version="8.0.15.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lib.CommonDef\Lib.CommonDef.csproj" />
+  </ItemGroup>
+
 </Project>

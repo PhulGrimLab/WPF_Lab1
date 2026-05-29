@@ -12,11 +12,11 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center">
-            <Button x:Name="Btn_Explorer" Content="폴더위치 열기" Margin="5">
-                
+            <Button x:Name="Btn_Explorer" Content="폴더위치 열기" Margin="5" Command="{Binding Btn_ExplorerCMD}">
+
             </Button>
             <TextBlock FontSize="12" Text="선택된 폴더 위치 표시" TextWrapping="Wrap" Margin="5" />
-            <Button x:Name="Btn_Action" Content="폴더위치 활성화" Margin="5">
+            <Button x:Name="Btn_Action" Content="폴더위치 활성화" Margin="5" Command="{Binding Btn_ActionCMD}">
 
             </Button>
         </StackPanel>
@@ -25,7 +25,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left">
+            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,394" Grid.RowSpan="2">
                 <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5">
                     <Run Text="Selected Folder: "/><Run x:Name="tb_SelectedFolder" FontWeight="Bold" Text="{Binding Tb_SelectedFolder}"/>
                 </TextBlock>
