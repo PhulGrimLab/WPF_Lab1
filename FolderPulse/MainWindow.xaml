@@ -1,0 +1,17 @@
+﻿<Window x:Class="FolderPulse.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:FolderPulse"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="450" Width="800">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <local:CtrlFolderPulse Grid.Row="0" x:Name="Ctrl_FolderPulse0"></local:CtrlFolderPulse>
+        <local:CtrlFolderPulse Grid.Row="1" x:Name="Ctrl_FolderPulse1"></local:CtrlFolderPulse>
+    </Grid>
+</Window>

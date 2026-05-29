@@ -1,0 +1,36 @@
+﻿<UserControl x:Class="FolderPulse.CtrlFolderPulse"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:FolderPulse"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center">
+            <Button x:Name="Btn_Explorer" Content="폴더위치 열기" Margin="5">
+                
+            </Button>
+            <TextBlock FontSize="12" Text="선택된 폴더 위치 표시" TextWrapping="Wrap" Margin="5" />
+            <Button x:Name="Btn_Action" Content="폴더위치 활성화" Margin="5">
+
+            </Button>
+        </StackPanel>
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left">
+                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5">
+                    <Run Text="Selected Folder: "/><Run x:Name="tb_SelectedFolder" FontWeight="Bold" Text="{Binding Tb_SelectedFolder}"/>
+                </TextBlock>
+            </StackPanel>
+
+        </Grid>
+    </Grid>
+</UserControl>
