@@ -39,7 +39,7 @@ public sealed class RtosTraceLog
 
         lock (_syncRoot)
         {
-            while (_entries.Count >= Capacity)
+            if (_entries.Count == Capacity)
             {
                 _entries.Dequeue();
             }
@@ -56,7 +56,9 @@ public sealed class RtosTraceLog
     {
         lock (_syncRoot)
         {
-            return _entries.ToArray();
+            return _entries.Count == 0
+                ? Array.Empty<RtosTraceEntry>()
+                : _entries.ToArray();
         }
     }
 

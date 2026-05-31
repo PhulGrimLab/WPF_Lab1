@@ -161,6 +161,9 @@ NextRunAt = 이번 기준 시각 + Period
 
 기본적으로 100ms마다 한 번씩 `SnapshotChanged` 이벤트를 발생시킵니다.
 
+현재 구현은 상태 변화가 없으면 스냅샷 생성을 건너뛰도록 version 기반 dirty check를 사용합니다.
+또한 선점 판단은 우선순위별 runnable 캐시를 먼저 확인하고, 필요할 때만 상위 우선순위 태스크를 직접 조회합니다.
+
 ```text
 SchedulerService
     SnapshotChanged 이벤트 발생
@@ -313,6 +316,9 @@ public void Dispose()
 1. `ShouldYieldToHigherPriorityTask`가 "더 높은 우선순위 + runnable"을 판단
 2. 태스크 본문이 `context.ShouldYield()`를 호출해 실제 양보 여부를 결정
 
+`ShouldYieldToHigherPriorityTask`는 먼저 캐시로 빠르게 탈락시키고, 그 다음에만 상위 우선순위 그룹을 확인합니다.
+이렇게 해서 선점이 잦아도 전체 태스크 스캔이 매번 일어나지 않도록 조정했습니다.
+
 즉 스케줄러가 강제로 중단시키는 구조가 아니라,
 태스크가 안전한 지점에서 스스로 양보하는 구조입니다.
 
@@ -338,3 +344,4 @@ StopAsync(timeout)
 1. Stop이 느리면: 태스크 내부 cancellationToken 확인 지점 점검
 2. 실행 순서가 이상하면: Priority와 NextRunAt 값 점검
 3. 선점이 약하면: LOW 태스크에서 `ShouldYield()` 호출 주기 점검
+4. 스냅샷이 과도하면: version 기반 dirty check와 snapshotInterval을 함께 점검

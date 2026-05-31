@@ -47,10 +47,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private readonly DiningPhilosophersDemo _diningDemo = new();
     private readonly PreemptionDemo _preemptionDemo = new();
     private readonly Dispatcher _dispatcher;
-    private readonly DispatcherTimer _preemptionUiTimer;
-    private readonly DispatcherTimer _diningUiTimer;
+    private readonly DispatcherTimer _uiRefreshTimer;
     private readonly object _snapshotSyncRoot = new();
     private readonly object _preemptionSnapshotSyncRoot = new();
+    private readonly object _preemptionDemoSnapshotSyncRoot = new();
+    private readonly object _diningSnapshotSyncRoot = new();
+    private readonly object _diningSchedulerSnapshotSyncRoot = new();
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _taskViewModels = [];
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _preemptionTaskViewModels = [];
     private readonly Dictionary<string, ScheduledTaskStatusViewModel> _diningTaskViewModels = [];
@@ -60,8 +62,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     private readonly HashSet<string> _diningActiveTaskNames = new(StringComparer.Ordinal);
     private SchedulerSnapshot? _latestSnapshot;
     private SchedulerSnapshot? _latestPreemptionSnapshot;
+    private PreemptionDemoSnapshot? _latestPreemptionDemoSnapshot;
+    private SchedulerSnapshot? _latestDiningSchedulerSnapshot;
+    private DiningPhilosophersSnapshot? _latestDiningSnapshot;
     private bool _isSnapshotApplyQueued;
     private bool _isPreemptionSnapshotApplyQueued;
+    private bool _isPreemptionDemoSnapshotApplyQueued;
     private bool _isRunningTests;
     private bool _isPreemptionTestRunning;
     private bool _isDiningRunning;
@@ -110,16 +116,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     public MainWindowViewModel()
     {
         _dispatcher = Application.Current.Dispatcher;
-        _preemptionUiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(80),
+            Interval = TimeSpan.FromMilliseconds(33),
         };
-        _preemptionUiTimer.Tick += OnPreemptionUiTimerTick;
-        _diningUiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
-        {
-            Interval = TimeSpan.FromMilliseconds(100),
-        };
-        _diningUiTimer.Tick += OnDiningUiTimerTick;
+        _uiRefreshTimer.Tick += OnUiRefreshTick;
+        _uiRefreshTimer.Start();
 
         StartCommand = new RelayCommand(StartScheduler, () => !_monitorDemo.IsRunning);
 
@@ -154,6 +156,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _monitorDemo.SnapshotChanged += OnSchedulerSnapshotChanged;
         _diningDemo.SnapshotChanged += OnDiningDemoSnapshotChanged;
         _diningDemo.SchedulerSnapshotChanged += OnDiningSchedulerSnapshotChanged;
+        _preemptionDemo.SnapshotChanged += OnPreemptionDemoSnapshotChanged;
         _preemptionDemo.SchedulerSnapshotChanged += OnPreemptionSchedulerSnapshotChanged;
 
         ApplyLatestSnapshot(_monitorDemo.CurrentSnapshot);
@@ -772,11 +775,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         _monitorDemo.SnapshotChanged -= OnSchedulerSnapshotChanged;
         _diningDemo.SnapshotChanged -= OnDiningDemoSnapshotChanged;
         _diningDemo.SchedulerSnapshotChanged -= OnDiningSchedulerSnapshotChanged;
+        _preemptionDemo.SnapshotChanged -= OnPreemptionDemoSnapshotChanged;
         _preemptionDemo.SchedulerSnapshotChanged -= OnPreemptionSchedulerSnapshotChanged;
-        _preemptionUiTimer.Stop();
-        _preemptionUiTimer.Tick -= OnPreemptionUiTimerTick;
-        _diningUiTimer.Stop();
-        _diningUiTimer.Tick -= OnDiningUiTimerTick;
+        _uiRefreshTimer.Stop();
+        _uiRefreshTimer.Tick -= OnUiRefreshTick;
         await StopDiningDemoAsync().ConfigureAwait(false);
         await StopPreemptionTestAsync().ConfigureAwait(false);
         await _diningDemo.DisposeAsync().ConfigureAwait(false);
@@ -827,7 +829,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
     {
         _diningDemo.Start();
         _isDiningRunning = true;
-        _diningUiTimer.Start();
         RefreshCommandStates();
     }
 
@@ -845,7 +846,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
 
         _isDiningRunning = false;
-        _diningUiTimer.Stop();
         await _dispatcher.InvokeAsync(() =>
         {
             ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
@@ -862,19 +862,20 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         RefreshCommandStates();
     }
 
-    private void OnDiningUiTimerTick(object? sender, EventArgs e)
-    {
-        ApplyDiningSnapshot(_diningDemo.CurrentSnapshot);
-    }
-
     private void OnDiningDemoSnapshotChanged(object? sender, DiningPhilosophersSnapshot snapshot)
     {
-        _dispatcher.BeginInvoke(() => ApplyDiningSnapshot(snapshot), DispatcherPriority.Background);
+        lock (_diningSnapshotSyncRoot)
+        {
+            _latestDiningSnapshot = snapshot;
+        }
     }
 
     private void OnDiningSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
     {
-        _dispatcher.BeginInvoke(() => ApplyDiningSchedulerSnapshot(snapshot), DispatcherPriority.Background);
+        lock (_diningSchedulerSnapshotSyncRoot)
+        {
+            _latestDiningSchedulerSnapshot = snapshot;
+        }
     }
 
     private void ApplyDiningSchedulerSnapshot(SchedulerSnapshot snapshot)
@@ -1210,7 +1211,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         await _dispatcher.InvokeAsync(() =>
         {
             ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot, forceLogSync: true);
-            _preemptionUiTimer.Start();
             RefreshCommandStates();
         });
     }
@@ -1233,16 +1233,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
 
         await _dispatcher.InvokeAsync(() =>
         {
-            _preemptionUiTimer.Stop();
             ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot, forceLogSync: true);
             ClearPreemptionActiveTasks();
             RefreshCommandStates();
         });
-    }
-
-    private void OnPreemptionUiTimerTick(object? sender, EventArgs e)
-    {
-        ApplyPreemptionSnapshot(_preemptionDemo.CurrentSnapshot);
     }
 
     private void UpdatePreemptionInspectorHighlight()
@@ -1276,7 +1270,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             _isSnapshotApplyQueued = true;
         }
 
-        _dispatcher.BeginInvoke(ApplyLatestSnapshot, DispatcherPriority.Background);
     }
 
     private void OnPreemptionSchedulerSnapshotChanged(object? sender, SchedulerSnapshot snapshot)
@@ -1293,7 +1286,31 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
             _isPreemptionSnapshotApplyQueued = true;
         }
 
-        _dispatcher.BeginInvoke(ApplyLatestPreemptionSnapshot, DispatcherPriority.Background);
+    }
+
+    private void OnPreemptionDemoSnapshotChanged(object? sender, PreemptionDemoSnapshot snapshot)
+    {
+        lock (_preemptionDemoSnapshotSyncRoot)
+        {
+            _latestPreemptionDemoSnapshot = snapshot;
+
+            if (_isPreemptionDemoSnapshotApplyQueued)
+            {
+                return;
+            }
+
+            _isPreemptionDemoSnapshotApplyQueued = true;
+        }
+
+    }
+
+    private void OnUiRefreshTick(object? sender, EventArgs e)
+    {
+        ApplyLatestSnapshot();
+        ApplyLatestPreemptionSnapshot();
+        ApplyLatestPreemptionDemoSnapshot();
+        ApplyLatestDiningSchedulerSnapshot();
+        ApplyLatestDiningSnapshot();
     }
 
     private void ApplyLatestPreemptionSnapshot()
@@ -1324,6 +1341,61 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable,
         }
 
         SyncActiveTasks(snapshot, _preemptionActiveTaskNames);
+    }
+
+    private void ApplyLatestPreemptionDemoSnapshot()
+    {
+        PreemptionDemoSnapshot? snapshot;
+
+        lock (_preemptionDemoSnapshotSyncRoot)
+        {
+            snapshot = _latestPreemptionDemoSnapshot;
+            _latestPreemptionDemoSnapshot = null;
+            _isPreemptionDemoSnapshotApplyQueued = false;
+        }
+
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        ApplyPreemptionSnapshot(snapshot);
+    }
+
+    private void ApplyLatestDiningSchedulerSnapshot()
+    {
+        SchedulerSnapshot? snapshot;
+
+        lock (_diningSchedulerSnapshotSyncRoot)
+        {
+            snapshot = _latestDiningSchedulerSnapshot;
+            _latestDiningSchedulerSnapshot = null;
+        }
+
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        ApplyDiningSchedulerSnapshot(snapshot);
+    }
+
+    private void ApplyLatestDiningSnapshot()
+    {
+        DiningPhilosophersSnapshot? snapshot;
+
+        lock (_diningSnapshotSyncRoot)
+        {
+            snapshot = _latestDiningSnapshot;
+            _latestDiningSnapshot = null;
+        }
+
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        ApplyDiningSnapshot(snapshot);
     }
 
     private void ApplyLatestSnapshot()

@@ -1,5 +1,20 @@
 # Scheduling Progress
 
+## 2026-05-25 Documentation Sync
+
+- 현재까지 반영한 성능/구조 변경 내용을 README와 핵심 가이드에 반영했다.
+- 업데이트한 파일:
+   - `README.md`
+   - `Docs/SchedulerService_Flow.md`
+   - `Docs/Samples_RTOS_Guide.md`
+   - `Docs/RTOS_Primitives_Deep_Dive.md`
+
+- 반영 요약:
+   - 선점 판정 경로의 캐시화
+   - EventFlags `WaitAny` 인덱싱
+   - snapshot dirty check
+   - 로그/trace 경량화
+
 ## 2026-05-24 Preemption Log Throttling / UI Bottleneck Mitigation
 
 사용자 이슈:

@@ -7,6 +7,8 @@ public sealed class RtosEventFlags : IDisposable
 {
     private readonly object _syncRoot = new();
     private readonly List<WaitRequest> _waiters = [];
+    private readonly List<WaitRequest> _waitAllWaiters = [];
+    private readonly Dictionary<uint, List<WaitRequest>> _waitAnyWaitersByBit = new();
     private uint _flags;
     private int _isDisposed;
 
@@ -44,7 +46,7 @@ public sealed class RtosEventFlags : IDisposable
         lock (_syncRoot)
         {
             _flags |= flags;
-            CompleteMatchingWaiters(completed);
+            CompleteMatchingWaiters(flags, completed);
         }
 
         foreach (var waiter in completed)
@@ -103,6 +105,8 @@ public sealed class RtosEventFlags : IDisposable
         {
             waitersToCancel = [.. _waiters];
             _waiters.Clear();
+            _waitAllWaiters.Clear();
+            _waitAnyWaitersByBit.Clear();
             _flags = 0;
         }
 
@@ -149,6 +153,15 @@ public sealed class RtosEventFlags : IDisposable
 
             request = new WaitRequest(this, flags, waitAll, autoClear);
             _waiters.Add(request);
+
+            if (waitAll)
+            {
+                _waitAllWaiters.Add(request);
+            }
+            else
+            {
+                IndexWaitAnyRequestUnsafe(request);
+            }
         }
 
         try
@@ -164,12 +177,18 @@ public sealed class RtosEventFlags : IDisposable
         return request.Task;
     }
 
-    private void CompleteMatchingWaiters(List<WaitRequest> completed)
+    private void CompleteMatchingWaiters(uint setFlags, List<WaitRequest> completed)
+    {
+        CompleteMatchingWaitAllWaiters(completed);
+        CompleteMatchingWaitAnyWaiters(setFlags, completed);
+    }
+
+    private void CompleteMatchingWaitAllWaiters(List<WaitRequest> completed)
     {
         // waiter를 뒤에서부터 순회하면 RemoveAt 시 인덱스 보정이 단순해진다.
-        for (var index = _waiters.Count - 1; index >= 0; index--)
+        for (var index = _waitAllWaiters.Count - 1; index >= 0; index--)
         {
-            var waiter = _waiters[index];
+            var waiter = _waitAllWaiters[index];
             var matched = GetMatchedFlags(waiter.Flags, waiter.WaitAll);
             if (matched == 0)
             {
@@ -182,8 +201,52 @@ public sealed class RtosEventFlags : IDisposable
             }
 
             waiter.MatchedFlags = matched;
-            _waiters.RemoveAt(index);
+            _waiters.Remove(waiter);
+            _waitAllWaiters.RemoveAt(index);
             completed.Add(waiter);
+        }
+    }
+
+    private void CompleteMatchingWaitAnyWaiters(uint setFlags, List<WaitRequest> completed)
+    {
+        if (setFlags == 0 || _waitAnyWaitersByBit.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<WaitRequest>? visited = null;
+
+        foreach (var bit in EnumerateBits(setFlags))
+        {
+            if (!_waitAnyWaitersByBit.TryGetValue(bit, out var bucket) || bucket.Count == 0)
+            {
+                continue;
+            }
+
+            for (var index = bucket.Count - 1; index >= 0; index--)
+            {
+                var waiter = bucket[index];
+                visited ??= new HashSet<WaitRequest>();
+                if (!visited.Add(waiter))
+                {
+                    continue;
+                }
+
+                var matched = GetMatchedFlags(waiter.Flags, waitAll: false);
+                if (matched == 0)
+                {
+                    continue;
+                }
+
+                if (waiter.AutoClear)
+                {
+                    _flags &= ~matched;
+                }
+
+                waiter.MatchedFlags = matched;
+                DetachWaiterUnsafe(waiter);
+                completed.Add(waiter);
+            }
         }
     }
 
@@ -199,7 +262,56 @@ public sealed class RtosEventFlags : IDisposable
     {
         lock (_syncRoot)
         {
-            _waiters.Remove(waiter);
+            DetachWaiterUnsafe(waiter);
+        }
+    }
+
+    private void DetachWaiterUnsafe(WaitRequest waiter)
+    {
+        _waiters.Remove(waiter);
+
+        if (waiter.WaitAll)
+        {
+            _waitAllWaiters.Remove(waiter);
+            return;
+        }
+
+        foreach (var bit in EnumerateBits(waiter.Flags))
+        {
+            if (!_waitAnyWaitersByBit.TryGetValue(bit, out var bucket))
+            {
+                continue;
+            }
+
+            bucket.Remove(waiter);
+            if (bucket.Count == 0)
+            {
+                _waitAnyWaitersByBit.Remove(bit);
+            }
+        }
+    }
+
+    private void IndexWaitAnyRequestUnsafe(WaitRequest request)
+    {
+        foreach (var bit in EnumerateBits(request.Flags))
+        {
+            if (!_waitAnyWaitersByBit.TryGetValue(bit, out var bucket))
+            {
+                bucket = [];
+                _waitAnyWaitersByBit.Add(bit, bucket);
+            }
+
+            bucket.Add(request);
+        }
+    }
+
+    private static IEnumerable<uint> EnumerateBits(uint flags)
+    {
+        while (flags != 0)
+        {
+            var bit = flags & (~flags + 1);
+            yield return bit;
+            flags &= ~bit;
         }
     }
 

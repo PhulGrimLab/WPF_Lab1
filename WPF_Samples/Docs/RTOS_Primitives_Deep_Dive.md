@@ -113,6 +113,9 @@ if (acquired)
 
 ### 3-3. RtosEventFlags
 
+현재 구현은 `WaitAnyAsync` 대기자를 비트별 인덱스로 관리해, `Set()` 시 모든 waiter를 선형 스캔하지 않도록 최적화되어 있습니다.
+`WaitAllAsync`는 기존처럼 조건 충족 여부를 직접 확인하는 방식이 유지됩니다.
+
 핵심 아이디어:
 
 - uint 비트를 이벤트 신호로 사용
@@ -173,6 +176,9 @@ var r2 = await queue.ReceiveAsync(TimeSpan.FromMilliseconds(100)); // B
 ---
 
 ### 3-5. RtosSoftwareTimer
+
+`RtosTraceLog`는 고정 크기 버퍼를 사용하며, 버퍼가 가득 찼을 때만 가장 오래된 항목을 제거합니다.
+최근에는 빈 스냅샷에서 불필요한 배열 복사를 줄이고, 로그가 실제로 기록될 때만 문자열을 만들도록 정리했습니다.
 
 핵심 아이디어:
 

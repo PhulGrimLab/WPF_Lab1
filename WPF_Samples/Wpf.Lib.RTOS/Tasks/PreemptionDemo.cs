@@ -201,7 +201,7 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
                 Interlocked.Exchange(ref _normalLastThreadId, Environment.CurrentManagedThreadId);
                 var count = Interlocked.Increment(ref _normalRunCount);
                 Interlocked.Exchange(ref _lastNormalRunTick, DateTime.UtcNow.Ticks);
-                AddLogEvery("normal-telemetry", 5, $"Normal Telemetry가 누적 {count}회 실행되었습니다.");
+                AddLogEvery("normal-telemetry", 5, () => $"Normal Telemetry가 누적 {count}회 실행되었습니다.");
                 await Task.Delay(8, cancellationToken).ConfigureAwait(false);
             },
             statusProvider: () => "Medium priority telemetry pulse"));
@@ -230,7 +230,7 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
                 var intervalText = previousStartedTicks > 0
                     ? $", 이전 실행 후 {TimeSpan.FromTicks(startedTicks - previousStartedTicks).TotalMilliseconds:N0}ms"
                     : string.Empty;
-                AddLogEvery("high-urgent-start", 3, $"High Priority Urgent가 누적 {count}회 시작되었습니다{intervalText}.");
+                AddLogEvery("high-urgent-start", 3, () => $"High Priority Urgent가 누적 {count}회 시작되었습니다{intervalText}.");
 
                 for (var burst = 1; burst <= 3; burst++)
                 {
@@ -238,7 +238,7 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
                     await Task.Delay(4, cancellationToken).ConfigureAwait(false);
                 }
 
-                AddLogEvery("high-urgent-burst", 3, $"High Priority Urgent burst 처리 누적 {count}회 완료");
+                AddLogEvery("high-urgent-burst", 3, () => $"High Priority Urgent burst 처리 누적 {count}회 완료");
             },
             statusProvider: () => "Critical burst work"));
     }
@@ -272,7 +272,7 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
                         Interlocked.Exchange(ref _lastYieldTick, DateTime.UtcNow.Ticks);
                         RecordLowWorkerYield(name);
                         var totalYieldCount = Volatile.Read(ref _yieldCount);
-                        AddLogEvery($"yield-{name}", 4, $"{name} 양보 누적 {totalYieldCount}회 (최근 진행률 {i + 1}/{workUnits})");
+                        AddLogEvery($"yield-{name}", 4, () => $"{name} 양보 누적 {totalYieldCount}회 (최근 진행률 {i + 1}/{workUnits})");
                         return;
                     }
 
@@ -281,7 +281,7 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
                     Interlocked.Exchange(ref stats.NextWorkUnit, i + 1);
                 }
 
-                AddLogEvery($"low-complete-{name}", 2, $"{name}가 low 작업 슬라이스를 누적 완료했습니다. workUnits={workUnits}");
+                AddLogEvery($"low-complete-{name}", 2, () => $"{name}가 low 작업 슬라이스를 누적 완료했습니다. workUnits={workUnits}");
                 Interlocked.Exchange(ref stats.NextWorkUnit, 0);
             },
             statusProvider: () =>
@@ -556,18 +556,18 @@ public sealed class PreemptionDemo : IDisposable, IAsyncDisposable
         return new PreemptionHealthState("관찰", "실행 데이터가 누적되는 중입니다. 추세를 조금 더 관찰하세요.", "기아 감지: 정상", false);
     }
 
-    private void AddLogEvery(string key, int every, string message)
+    private void AddLogEvery(string key, int every, Func<string> messageFactory)
     {
         if (every <= 1)
         {
-            AddLog(message);
+            AddLog(messageFactory());
             return;
         }
 
         var count = _logOccurrenceCounts.AddOrUpdate(key, 1, static (_, current) => current + 1);
         if (count % every == 0)
         {
-            AddLog(message);
+            AddLog(messageFactory());
         }
     }
 

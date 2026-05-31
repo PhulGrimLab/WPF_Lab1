@@ -108,6 +108,8 @@ dotnet run --project WpfSamples.Tests.Cli/WpfSamples.Tests.Cli.csproj -- --compa
 1. 본 프로젝트는 학습용 RTOS 시뮬레이터입니다.
 2. 실제 RTOS 커널(인터럽트 기반 강제 선점, 하드 실시간 보장)과는 차이가 있습니다.
 3. 선점 판정은 RTOS 태스크 간 동작을 기준으로 하며, UI 스레드는 판정 대상에서 제외합니다.
+4. 최근에는 선점 판정 경로, EventFlags 대기 처리, 스냅샷 생성, trace 로그 적재를 단계적으로 경량화했습니다.
+5. WpfSamples는 실행 주체가 아니라 표시 계층이며, 라이브러리의 snapshot을 받아 화면에 반영합니다.
 
 ## 문서
 

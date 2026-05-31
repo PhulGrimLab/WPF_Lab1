@@ -10,6 +10,10 @@ namespace Wpf.Lib.RTOS
         private readonly object _syncRoot = new();
         private readonly object _stateSyncRoot = new();
         private readonly List<IScheduledTask> _tasks = [];
+        private readonly List<IScheduledTask> _lowPriorityTasks = [];
+        private readonly List<IScheduledTask> _normalPriorityTasks = [];
+        private readonly List<IScheduledTask> _highPriorityTasks = [];
+        private readonly List<IScheduledTask> _criticalPriorityTasks = [];
         private readonly List<IScheduledTask> _executionBuffer = [];
         private readonly Dictionary<IScheduledTask, TaskRuntimeInfo> _runtimeInfos = [];
         private readonly Dictionary<IScheduledTask, DateTimeOffset> _disabledRevisitAt = [];
@@ -24,6 +28,11 @@ namespace Wpf.Lib.RTOS
         private SchedulerRunState _state = SchedulerRunState.Stopped;
         private long _dueSequence;
         private bool _isDueQueueDirty;
+        private long _nextRunnableDueUtcTicksAboveLow = long.MaxValue;
+        private long _nextRunnableDueUtcTicksAboveNormal = long.MaxValue;
+        private long _nextRunnableDueUtcTicksAboveHigh = long.MaxValue;
+        private long _snapshotVersion;
+        private long _lastPublishedSnapshotVersion;
 
         /// <summary>
         /// 스케줄러를 생성합니다.
@@ -75,10 +84,12 @@ namespace Wpf.Lib.RTOS
         {
             ThrowIfDisposed();
 
+            var now = DateTimeOffset.Now;
+
             return new SchedulerSnapshot(
-                DateTimeOffset.Now,
+                now,
                 IsRunning,
-                CreateTaskSnapshots());
+                CreateTaskSnapshots(now));
         }
 
         /// <summary>
@@ -113,8 +124,11 @@ namespace Wpf.Lib.RTOS
                 }
 
                 _tasks.Add(task);
+                var priority = TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low);
+                GetPriorityBucketUnsafe(priority).Add(task);
                 _runtimeInfos[task] = new TaskRuntimeInfo();
                 EnqueueTaskUnsafe(task);
+                RefreshRunnableDueCacheUnsafe(priority);
             }
 
             TraceLog.Add("Scheduler", "Task registered.", GetTaskName(task));
@@ -139,9 +153,12 @@ namespace Wpf.Lib.RTOS
                 removed = _tasks.Remove(task);
                 _runtimeInfos.Remove(task);
                 _disabledRevisitAt.Remove(task);
+                var priority = TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low);
+                RemoveFromPriorityBucketUnsafe(task, priority);
                 if (removed)
                 {
                     _isDueQueueDirty = true;
+                    RefreshRunnableDueCacheUnsafe(priority);
                 }
             }
 
@@ -164,10 +181,17 @@ namespace Wpf.Lib.RTOS
             lock (_syncRoot)
             {
                 _tasks.Clear();
+                _lowPriorityTasks.Clear();
+                _normalPriorityTasks.Clear();
+                _highPriorityTasks.Clear();
+                _criticalPriorityTasks.Clear();
                 _runtimeInfos.Clear();
                 _disabledRevisitAt.Clear();
                 _dueTaskQueue.Clear();
                 _isDueQueueDirty = false;
+                _nextRunnableDueUtcTicksAboveLow = long.MaxValue;
+                _nextRunnableDueUtcTicksAboveNormal = long.MaxValue;
+                _nextRunnableDueUtcTicksAboveHigh = long.MaxValue;
             }
 
             TraceLog.Add("Scheduler", "All tasks cleared.");
@@ -478,23 +502,15 @@ namespace Wpf.Lib.RTOS
         {
             var stopwatch = Stopwatch.StartNew();
             var completedAt = now;
-            var executionContext = new SchedulerContext(now, () => ShouldYieldToHigherPriorityTask(task));
-            CancellationTokenSource? quantumCts = null;
-            var executionToken = cancellationToken;
-
-            if (_timeQuantum is not null)
-            {
-                quantumCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                quantumCts.CancelAfter(_timeQuantum.Value);
-                executionToken = quantumCts.Token;
-            }
+            var quantumDeadline = _timeQuantum is null ? DateTimeOffset.MaxValue : now + _timeQuantum.Value;
+            var executionContext = new SchedulerContext(now, () => ShouldYieldToHigherPriorityTask(task) || DateTimeOffset.Now >= quantumDeadline);
 
             MarkTaskStarted(task, now, DateTimeOffset.Now, Environment.CurrentManagedThreadId);
             TraceLog.Add("Task", "Task execution started.", GetTaskName(task));
 
             try
             {
-                await task.ExecuteAsync(executionContext, executionToken).ConfigureAwait(false);
+                await task.ExecuteAsync(executionContext, cancellationToken).ConfigureAwait(false);
 
                 stopwatch.Stop();
                 completedAt = DateTimeOffset.Now;
@@ -504,20 +520,6 @@ namespace Wpf.Lib.RTOS
                 MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState, Environment.CurrentManagedThreadId);
                 var completionKind = executionContext.IsPreempted ? "preempted" : "completed";
                 TraceLog.Add("Task", $"Task execution {completionKind} in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (OperationCanceledException) when (quantumCts is not null && quantumCts.IsCancellationRequested)
-            {
-                stopwatch.Stop();
-                completedAt = DateTimeOffset.Now;
-                executionContext.MarkPreempted();
-
-                var nextState = CalculateNextTaskState(task, completedAt);
-                MarkTaskCompleted(task, completedAt, stopwatch.Elapsed, GetTaskPeriod(task), nextState, Environment.CurrentManagedThreadId);
-                TraceLog.Add("Task", $"Task execution preempted by time quantum in {stopwatch.Elapsed.TotalMilliseconds:N2} ms.", GetTaskName(task));
             }
             catch (Exception ex)
             {
@@ -531,14 +533,18 @@ namespace Wpf.Lib.RTOS
             finally
             {
                 ScheduleNextRunIfRegistered(task, now, completedAt, executionContext.IsPreempted);
-                quantumCts?.Dispose();
             }
         }
 
         private bool ShouldYieldToHigherPriorityTask(IScheduledTask runningTask)
         {
             var runningPriority = TryGetTaskValue(runningTask, task => task.Priority, Enum_TaskPriority.Low);
-            var now = DateTimeOffset.Now;
+            var nowUtcTicks = DateTimeOffset.UtcNow.UtcTicks;
+
+            if (nowUtcTicks < GetCachedNextRunnableDueUtcTicksAbovePriority(runningPriority))
+            {
+                return false;
+            }
 
             lock (_syncRoot)
             {
@@ -547,35 +553,26 @@ namespace Wpf.Lib.RTOS
                     return false;
                 }
 
-                foreach (var candidate in _tasks)
+                var candidateBuckets = GetHigherPriorityBucketsUnsafe(runningPriority);
+                foreach (var bucket in candidateBuckets)
                 {
-                    if (ReferenceEquals(candidate, runningTask))
+                    foreach (var candidate in bucket)
                     {
-                        continue;
-                    }
+                        if (!_runtimeInfos.ContainsKey(candidate))
+                        {
+                            continue;
+                        }
 
-                    if (!_runtimeInfos.ContainsKey(candidate))
-                    {
-                        continue;
-                    }
+                        if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
+                        {
+                            continue;
+                        }
 
-                    if (!TryGetTaskValue(candidate, task => task.IsEnabled, false))
-                    {
-                        continue;
-                    }
-
-                    var candidatePriority = TryGetTaskValue(candidate, task => task.Priority, Enum_TaskPriority.Low);
-                    if (candidatePriority <= runningPriority)
-                    {
-                        continue;
-                    }
-
-                    var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
-
-                    // "더 높은 우선순위" + "지금 실행 가능"이면 양보 신호를 true로 준다.
-                    if (candidateNextRunAt <= now)
-                    {
-                        return true;
+                        var candidateNextRunAt = TryGetTaskValue(candidate, task => task.NextRunAt, DateTimeOffset.MaxValue);
+                        if (candidateNextRunAt.UtcTicks <= nowUtcTicks)
+                        {
+                            return true;
+                        }
                     }
                 }
             }
@@ -590,6 +587,7 @@ namespace Wpf.Lib.RTOS
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
                     runtimeInfo.MarkStarted(scheduledAt, startedAt, threadId);
+                    MarkSnapshotDirtyUnsafe();
                 }
             }
         }
@@ -601,6 +599,7 @@ namespace Wpf.Lib.RTOS
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
                     runtimeInfo.MarkCompleted(completedAt, duration, period, nextState, threadId);
+                    MarkSnapshotDirtyUnsafe();
                 }
             }
         }
@@ -612,6 +611,7 @@ namespace Wpf.Lib.RTOS
                 if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                 {
                     runtimeInfo.MarkFailed(completedAt, duration, period, error, nextState, threadId);
+                    MarkSnapshotDirtyUnsafe();
                 }
             }
         }
@@ -625,6 +625,7 @@ namespace Wpf.Lib.RTOS
                     return;
                 }
 
+                var priority = TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low);
                 var mode = TryGetTaskValue(task, candidate => candidate.Mode, Enum_TaskExecutionMode.OneShot);
                 var period = TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero);
                 var overrunPolicy = TryGetTaskValue(task, candidate => candidate.OverrunPolicy, Enum_TaskOverrunPolicy.FixedRate);
@@ -652,6 +653,8 @@ namespace Wpf.Lib.RTOS
                     task.NextRunAt = GetNextRunAt(mode, overrunPolicy, period, scheduledAt, completedAt);
                     EnqueueTaskUnsafe(task);
                 }
+
+                RefreshRunnableDueCacheUnsafe(priority);
             }
         }
 
@@ -743,6 +746,104 @@ namespace Wpf.Lib.RTOS
                 && queuedPriority.PriorityOrder == currentPriorityOrder;
         }
 
+        private List<IScheduledTask> GetPriorityBucketUnsafe(Enum_TaskPriority priority)
+        {
+            return priority switch
+            {
+                Enum_TaskPriority.Low => _lowPriorityTasks,
+                Enum_TaskPriority.Normal => _normalPriorityTasks,
+                Enum_TaskPriority.High => _highPriorityTasks,
+                Enum_TaskPriority.Critical => _criticalPriorityTasks,
+                _ => _lowPriorityTasks,
+            };
+        }
+
+        private void RemoveFromPriorityBucketUnsafe(IScheduledTask task, Enum_TaskPriority priority)
+        {
+            GetPriorityBucketUnsafe(priority).Remove(task);
+        }
+
+        private IReadOnlyList<List<IScheduledTask>> GetHigherPriorityBucketsUnsafe(Enum_TaskPriority runningPriority)
+        {
+            return runningPriority switch
+            {
+                Enum_TaskPriority.Low => [_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks],
+                Enum_TaskPriority.Normal => [_highPriorityTasks, _criticalPriorityTasks],
+                Enum_TaskPriority.High => [_criticalPriorityTasks],
+                _ => [],
+            };
+        }
+
+        private long GetCachedNextRunnableDueUtcTicksAbovePriority(Enum_TaskPriority runningPriority)
+        {
+            return runningPriority switch
+            {
+                Enum_TaskPriority.Low => Volatile.Read(ref _nextRunnableDueUtcTicksAboveLow),
+                Enum_TaskPriority.Normal => Volatile.Read(ref _nextRunnableDueUtcTicksAboveNormal),
+                Enum_TaskPriority.High => Volatile.Read(ref _nextRunnableDueUtcTicksAboveHigh),
+                _ => long.MaxValue,
+            };
+        }
+
+        private void RefreshRunnableDueCacheUnsafe(Enum_TaskPriority changedPriority)
+        {
+            switch (changedPriority)
+            {
+                case Enum_TaskPriority.Low:
+                    _nextRunnableDueUtcTicksAboveLow = GetEarliestRunnableDueUtcTicksUnsafe(_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks);
+                    break;
+                case Enum_TaskPriority.Normal:
+                    _nextRunnableDueUtcTicksAboveLow = GetEarliestRunnableDueUtcTicksUnsafe(_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveNormal = GetEarliestRunnableDueUtcTicksUnsafe(_highPriorityTasks, _criticalPriorityTasks);
+                    break;
+                case Enum_TaskPriority.High:
+                    _nextRunnableDueUtcTicksAboveLow = GetEarliestRunnableDueUtcTicksUnsafe(_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveNormal = GetEarliestRunnableDueUtcTicksUnsafe(_highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveHigh = GetEarliestRunnableDueUtcTicksUnsafe(_criticalPriorityTasks);
+                    break;
+                case Enum_TaskPriority.Critical:
+                    _nextRunnableDueUtcTicksAboveLow = GetEarliestRunnableDueUtcTicksUnsafe(_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveNormal = GetEarliestRunnableDueUtcTicksUnsafe(_highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveHigh = GetEarliestRunnableDueUtcTicksUnsafe(_criticalPriorityTasks);
+                    break;
+                default:
+                    _nextRunnableDueUtcTicksAboveLow = GetEarliestRunnableDueUtcTicksUnsafe(_normalPriorityTasks, _highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveNormal = GetEarliestRunnableDueUtcTicksUnsafe(_highPriorityTasks, _criticalPriorityTasks);
+                    _nextRunnableDueUtcTicksAboveHigh = GetEarliestRunnableDueUtcTicksUnsafe(_criticalPriorityTasks);
+                    break;
+            }
+        }
+
+        private long GetEarliestRunnableDueUtcTicksUnsafe(params List<IScheduledTask>[] buckets)
+        {
+            var earliest = long.MaxValue;
+
+            foreach (var bucket in buckets)
+            {
+                foreach (var task in bucket)
+                {
+                    if (!_runtimeInfos.ContainsKey(task))
+                    {
+                        continue;
+                    }
+
+                    if (!TryGetTaskValue(task, candidate => candidate.IsEnabled, false))
+                    {
+                        continue;
+                    }
+
+                    var nextRunAt = TryGetTaskValue(task, candidate => candidate.NextRunAt, DateTimeOffset.MaxValue);
+                    var nextRunTicks = nextRunAt.UtcTicks;
+                    if (nextRunTicks < earliest)
+                    {
+                        earliest = nextRunTicks;
+                    }
+                }
+            }
+
+            return earliest;
+        }
+
         private DateTimeOffset GetExpectedQueueNextRunAtUnsafe(IScheduledTask task, bool isEnabled, DateTimeOffset nextRunAt)
         {
             if (isEnabled)
@@ -758,6 +859,8 @@ namespace Wpf.Lib.RTOS
 
         private void PublishSnapshotIfDue(DateTimeOffset now)
         {
+            var currentVersion = Volatile.Read(ref _snapshotVersion);
+
             lock (_stateSyncRoot)
             {
                 if (now < _nextSnapshotAt)
@@ -765,58 +868,80 @@ namespace Wpf.Lib.RTOS
                     return;
                 }
 
+                if (currentVersion == Volatile.Read(ref _lastPublishedSnapshotVersion))
+                {
+                    return;
+                }
+
                 _nextSnapshotAt = now + _snapshotInterval;
             }
 
-            PublishSnapshot();
+            PublishSnapshot(currentVersion);
         }
 
         private void PublishSnapshot(bool force = false)
         {
+            var now = DateTimeOffset.Now;
+            var snapshotVersion = Volatile.Read(ref _snapshotVersion);
+
             if (force)
             {
                 lock (_stateSyncRoot)
                 {
-                    _nextSnapshotAt = DateTimeOffset.Now + _snapshotInterval;
+                    _nextSnapshotAt = now + _snapshotInterval;
                 }
             }
 
-            var taskSnapshots = CreateTaskSnapshots();
+            var taskSnapshots = CreateTaskSnapshots(now);
 
             RaiseSnapshotChanged(new SchedulerSnapshot(
-                DateTimeOffset.Now,
+                now,
                 IsRunning,
                 taskSnapshots));
+
+            if (force || snapshotVersion == Volatile.Read(ref _snapshotVersion))
+            {
+                Volatile.Write(ref _lastPublishedSnapshotVersion, snapshotVersion);
+            }
         }
 
-        private IReadOnlyList<ScheduledTaskSnapshot> CreateTaskSnapshots()
+        private void PublishSnapshot(long snapshotVersion)
         {
-            List<(IScheduledTask Task, TaskRuntimeSnapshot Runtime)> snapshotSources;
+            var now = DateTimeOffset.Now;
+            var taskSnapshots = CreateTaskSnapshots(now);
+
+            RaiseSnapshotChanged(new SchedulerSnapshot(
+                now,
+                IsRunning,
+                taskSnapshots));
+
+            if (snapshotVersion == Volatile.Read(ref _snapshotVersion))
+            {
+                Volatile.Write(ref _lastPublishedSnapshotVersion, snapshotVersion);
+            }
+        }
+
+        private IReadOnlyList<ScheduledTaskSnapshot> CreateTaskSnapshots(DateTimeOffset now)
+        {
+            List<ScheduledTaskSnapshot> snapshots;
 
             lock (_syncRoot)
             {
-                snapshotSources = new List<(IScheduledTask Task, TaskRuntimeSnapshot Runtime)>(_tasks.Count);
+                snapshots = new List<ScheduledTaskSnapshot>(_tasks.Count);
 
                 foreach (var task in _tasks)
                 {
                     if (_runtimeInfos.TryGetValue(task, out var runtimeInfo))
                     {
-                        snapshotSources.Add((task, runtimeInfo.ToSnapshot()));
+                        snapshots.Add(CreateTaskSnapshot(task, runtimeInfo.ToSnapshot(), now));
                     }
                 }
-            }
-
-            var snapshots = new List<ScheduledTaskSnapshot>(snapshotSources.Count);
-
-            foreach (var source in snapshotSources)
-            {
-                snapshots.Add(CreateTaskSnapshot(source.Task, source.Runtime));
             }
 
             return snapshots;
         }
 
-        private static ScheduledTaskSnapshot CreateTaskSnapshot(IScheduledTask task, TaskRuntimeSnapshot runtimeInfo)
+        private static ScheduledTaskSnapshot CreateTaskSnapshot(IScheduledTask task, TaskRuntimeSnapshot runtimeInfo, DateTimeOffset now)
         {
             var name = GetTaskName(task);
             var isEnabled = TryGetTaskValue(task, candidate => candidate.IsEnabled, false);
@@ -827,7 +952,7 @@ namespace Wpf.Lib.RTOS
                 TryGetTaskValue(task, candidate => candidate.Priority, Enum_TaskPriority.Low),
                 TryGetTaskValue(task, candidate => candidate.Period, TimeSpan.Zero),
                 TryGetTaskValue(task, candidate => candidate.Mode, Enum_TaskExecutionMode.OneShot),
-                GetSnapshotState(isEnabled, nextRunAt, runtimeInfo),
+                GetSnapshotState(isEnabled, nextRunAt, runtimeInfo, now),
                 nextRunAt,
                 isEnabled,
                 GetTaskStatus(task),
@@ -844,6 +969,11 @@ namespace Wpf.Lib.RTOS
                 runtimeInfo.LastError,
                 runtimeInfo.LastStartedThreadId,
                 runtimeInfo.LastCompletedThreadId);
+        }
+
+        private void MarkSnapshotDirtyUnsafe()
+        {
+            Interlocked.Increment(ref _snapshotVersion);
         }
 
         /// <summary>
@@ -909,7 +1039,7 @@ namespace Wpf.Lib.RTOS
             return scheduledAt + TimeSpan.FromTicks(checked(period.Ticks * missedPeriods));
         }
 
-        private static Enum_TaskState GetSnapshotState(bool isEnabled, DateTimeOffset nextRunAt, TaskRuntimeSnapshot runtimeInfo)
+        private static Enum_TaskState GetSnapshotState(bool isEnabled, DateTimeOffset nextRunAt, TaskRuntimeSnapshot runtimeInfo, DateTimeOffset now)
         {
             if (!isEnabled)
             {
@@ -921,7 +1051,7 @@ namespace Wpf.Lib.RTOS
                 return Enum_TaskState.Running;
             }
 
-            return nextRunAt <= DateTimeOffset.Now
+            return nextRunAt <= now
                 ? Enum_TaskState.Ready
                 : Enum_TaskState.Blocked;
         }
