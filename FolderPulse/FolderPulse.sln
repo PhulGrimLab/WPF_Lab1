@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderPulse", "FolderPulse.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lib.CommonDef", "..\Lib.CommonDef\Lib.CommonDef.csproj", "{79D9E340-1D25-442C-B151-FD616EB9B308}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderPulseTestConsole", "FolderPulseTestConsole\FolderPulseTestConsole.csproj", "{FBD9523D-54F9-465B-9EB8-007760C2CC26}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,10 @@ Global
 		{79D9E340-1D25-442C-B151-FD616EB9B308}.Debug|x64.Build.0 = Debug|x64
 		{79D9E340-1D25-442C-B151-FD616EB9B308}.Release|x64.ActiveCfg = Release|Any CPU
 		{79D9E340-1D25-442C-B151-FD616EB9B308}.Release|x64.Build.0 = Release|Any CPU
+		{FBD9523D-54F9-465B-9EB8-007760C2CC26}.Debug|x64.ActiveCfg = Debug|x64
+		{FBD9523D-54F9-465B-9EB8-007760C2CC26}.Debug|x64.Build.0 = Debug|x64
+		{FBD9523D-54F9-465B-9EB8-007760C2CC26}.Release|x64.ActiveCfg = Release|Any CPU
+		{FBD9523D-54F9-465B-9EB8-007760C2CC26}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
