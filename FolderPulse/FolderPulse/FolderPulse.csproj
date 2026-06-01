@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Lib.CommonDef\Lib.CommonDef.csproj" />
+    <ProjectReference Include="..\..\Lib.CommonDef\Lib.CommonDef.csproj" />
   </ItemGroup>
 
 </Project>

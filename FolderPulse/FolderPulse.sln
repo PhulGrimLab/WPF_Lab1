@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.37314.3
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderPulse", "FolderPulse.csproj", "{30F9F0E0-46DB-430B-8C04-2821D13B0F3D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderPulse", "FolderPulse\FolderPulse.csproj", "{30F9F0E0-46DB-430B-8C04-2821D13B0F3D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lib.CommonDef", "..\Lib.CommonDef\Lib.CommonDef.csproj", "{79D9E340-1D25-442C-B151-FD616EB9B308}"
 EndProject
