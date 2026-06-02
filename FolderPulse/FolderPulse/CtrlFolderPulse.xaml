@@ -53,6 +53,9 @@
                     <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightYellow">
                     <Run Text="Subfolder Count: "/><Run x:Name="tb_SubFolderCount" FontWeight="Bold" Text="{Binding Tb_SubFolderCount}"/>
                     </TextBlock>
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightBlue">
+                    <Run Text="TotalFile Count: "/><Run x:Name="tb_FileCount" FontWeight="Bold" Text="{Binding Tb_FileCount}"/>
+                    </TextBlock>
                 </StackPanel>
             </Grid>
 
