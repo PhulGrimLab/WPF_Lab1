@@ -1,0 +1,51 @@
+================================================================================
+파일명: Chapter7_USING_ALERT_번역.txt
+================================================================================
+
+===== Page 29 (원문) =====
+
+## USING ALERT: DIVERTING THE FLOW OF CONTROL
+
+The purpose of alerts is to cause termination of a long running computation or a longterm wait. For example, on a multi- processor it might be useful to fork multiple competing algorithms to solve the same problem, and when the first of them completes you abort the others. Or you might embark on a long computation (e.g. a database query), but abort it if the user clicks a CANCEL button.
+
+The programming convention we use at SRC is that any procedure in a public interface that might incur a long computation or a long- term wait should be alertable. In other words, a long computation should occasionally call "TestAlert" and long- term waits should be calls of "AlertWait" instead of "Wait". In this context "long" means long enough to upset a human user. The attraction of this convention is that you can be sure that the user can always regain control of the application program. The disadvantage is that programs calling these procedures must be prepared for the "Alerted" exception to come out of them. This convention is less rigorously applied when a single entry point occasionally (but not always) causes a long- term wait.
+
+Another programming convention we have is that you should only alert a thread if you forked the thread. For example, a package should not alert a caller's thread that happens to be executing inside the package. This convention allows you to view an alert as an indication that the thread should terminate completely.
+
+The problem with alerts (or any other form of asynchronous interrupt mechanism, such as Apollo's "task_Signal") is that they are, by their very nature, intrusive. Using them will tend to make your program less well structured. A straightforward- looking flow of control in one thread can suddenly be diverted because of an action initiated by another thread. This is another example of a facility that makes it harder to verify the correctness of a piece of program by local inspection. Unless alerts are used with great restraint, they will make your program unreadable, unmaintainable, and perhaps incorrect.
+
+===== Page 29 (번역) =====
+
+## 알림 사용하기: 제어 흐름 전환 (USING ALERT: DIVERTING THE FLOW OF CONTROL)
+
+알림(alert)의 목적은 오래 실행되는 계산이나 장기 대기를 종료시키는 것입니다. 예를 들어, 멀티프로세서에서는 동일한 문제를 해결하기 위해 여러 개의 경쟁 알고리즘을 포크(fork)하고, 그중 첫 번째가 완료되면 나머지를 중단(abort)시키는 것이 유용할 수 있습니다. 또는 긴 계산(예: 데이터베이스 질의)을 시작했지만, 사용자가 CANCEL 버튼을 클릭하면 중단시킬 수 있습니다.
+
+SRC에서 우리가 사용하는 프로그래밍 관례는, 공용 인터페이스(public interface)에서 긴 계산이나 장기 대기를 초래할 수 있는 모든 프로시저는 알림 가능(alertable)해야 한다는 것입니다. 즉, 긴 계산은 때때로 "TestAlert"을 호출해야 하고, 장기 대기는 "Wait" 대신 "AlertWait"을 호출해야 합니다. 여기서 "길다(long)"라는 것은 인간 사용자를 불쾌하게 할 만큼 충분히 긴 것을 의미합니다. 이 관례의 장점은 사용자가 항상 애플리케이션 프로그램의 제어권을 되찾을 수 있다는 확신을 가질 수 있다는 것입니다. 단점은 이러한 프로시저들을 호출하는 프로그램들이 그들로부터 "Alerted" 예외가 발생할 준비를 해야 한다는 것입니다. 이 관례는 단일 진입점이 때때로(항상은 아니지만) 장기 대기를 유발하는 경우에는 덜 엄격하게 적용됩니다.
+
+우리가 가진 또 다른 프로그래밍 관례는, 자신이 포크한 스레드에 대해서만 알림(alert)을 보내야 한다는 것입니다. 예를 들어, 패키지는 패키지 내에서 실행 중인 호출자(caller)의 스레드에 알림을 보내서는 안 됩니다. 이 관례를 통해 알림을 해당 스레드가 완전히 종료되어야 한다는 표시로 간주할 수 있습니다.
+
+알림(또는 Apollo의 "task_Signal"과 같은 다른 형태의 비동기 인터럽트 메커니즘)의 문제점은 본질적으로 침투적(intrusive)이라는 것입니다. 이를 사용하면 프로그램의 구조가 덜 체계적으로 되는 경향이 있습니다. 한 스레드에서 직관적으로 보이는 제어 흐름이 다른 스레드에 의해 시작된 동작 때문에 갑자기 전환될 수 있습니다. 이는 지역적 검사(local inspection)로 프로그램 조각의 정확성을 검증하기 더 어렵게 만드는 기능의 또 다른 예입니다. 알림은 매우 제한적으로 사용하지 않으면, 프로그램을 읽기 어렵고, 유지보수하기 어렵고, 아마도 올바르지 않게 만들 것입니다.
+
+================================================================================
+
+===== Page 30 (원문) =====
+
+26 - An Introduction to Programming with Threads
+
+There are alternatives to using alerts. If you know which condition variable a thread is blocked on, you can more simply prod it by setting a boolean flag and signalling the condition variable. A package could provide additional entry points whose purpose is to prod a thread blocked inside the package on a long- term wait.
+
+Alerts are most useful when you don't know exactly what is going on. For example, the target thread might be blocked in any of several packages, or within a single package it might be blocked on any of several condition variables. In these cases an alert is certainly the best solution. Even when other alternatives are available, it might be best to use alerts just because they are a single unified scheme for provoking thread termination.
+
+There is no consensus yet among the designers of thread facilities about how to tackle this problem. Each designer has his own solution, and each solution so far has its own problems.
+
+===== Page 30 (번역) =====
+
+26 - An Introduction to Programming with Threads
+
+알림을 사용하는 대안이 있습니다. 스레드가 어떤 조건 변수에서 블록되어 있는지 알고 있다면, 불리언 플래그(boolean flag)를 설정하고 조건 변수에 시그널을 보내는 방식으로 더 간단하게 스레드를 찔러(prod) 깨울 수 있습니다. 패키지는 장기 대기로 패키지 내부에 블록된 스레드를 찔러 깨우는 목적의 추가 진입점을 제공할 수 있습니다.
+
+알림은 정확히 무슨 일이 일어나고 있는지 알 수 없을 때 가장 유용합니다. 예를 들어, 대상 스레드가 여러 패키지 중 어느 하나에서 블록되었을 수도 있고, 단일 패키지 내에서도 여러 조건 변수 중 어느 하나에서 블록되었을 수도 있습니다. 이러한 경우 알림이 확실히 최선의 해결책입니다. 다른 대안이 가능할 때라도, 알림이 스레드 종료를 유발하는 단일 통합 방식이기 때문에 알림을 사용하는 것이 가장 좋을 수 있습니다.
+
+이 문제를 어떻게 해결할지에 대해 스레드 기능 설계자들 사이에는 아직 합의가 없습니다. 각 설계자는 자신만의 해결책을 가지고 있으며, 지금까지의 각 해결책은 저마다의 문제점을 가지고 있습니다.
+
+================================================================================

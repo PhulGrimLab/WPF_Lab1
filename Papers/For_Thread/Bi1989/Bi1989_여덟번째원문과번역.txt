@@ -1,0 +1,47 @@
+================================================================================
+파일명: Chapter9_BUILDING_YOUR_PROGRAM_번역.txt
+================================================================================
+
+===== Page 32 (원문) =====
+
+## BUILDING YOUR PROGRAM
+
+A successful program must be useful, correct, live (as defined below) and efficient. Your use of concurrency can impact each of these. I have discussed quite a few techniques in the previous sections that will help you. But how will you know if you have succeeded? The answer is not clear, but this section might help you towards discovering it.
+
+The place where concurrency can affect usefulness is in the design of the interfaces to library packages. You must design your interfaces with the assumption that your callers will be using multiple threads. This means that you must ensure that all the entry points are thread re- entrant (i.e. they can be called by multiple threads simultaneously), even if this means that each procedure immediately locks a central mutex. You must not return results in shared global variables, nor in global statically allocated storage. Your calls should be synchronous, not returning until their results are available—if your caller wants to do other work meanwhile, he can do it in other threads. Even if you don't presently have any multi- threaded clients of the interface, I strongly recommend that you follow these guidelines so that you will avoid problems in the future.
+
+By "correct" I mean that if your program eventually produces an answer, it will be the one defined by its specification. Your programming environment is unlikely to provide much help here beyond what it already provides for sequential programs. Mostly, you must be fastidious about associating each piece of data with one (and only one) mutex. If you don't pay constant attention to this, your task will be hopeless. If you use mutexes correctly, and you always use condition variables in the recommended style (re- testing the boolean expression after returning from "Wait"), then you are unlikely to go wrong.
+
+By "live", I mean that your program will eventually produce an answer. The alternatives are infinite loops or deadlock. I can't help you with infinite loops. I believe that the hints of the preceding sections will help you to avoid deadlocks. But if you fail and produce a deadlock, it should be quite easy to detect. Your major help in analyzing a deadlock will come from a symbolic debugger. The debugger must provide at least minimal support for threads—enumerating the existing threads and looking at each thread's stack. Hopefully, your debugger will also provide some filtering in the thread enumeration, for example finding all threads that have a stack frame in a particular
+
+===== Page 32 (번역) =====
+
+## 프로그램 구축하기 (BUILDING YOUR PROGRAM)
+
+성공적인 프로그램은 유용하고(useful), 올바르고(correct), 활성(live, 아래 정의됨) 그리고 효율적(efficient)이어야 합니다. 동시성 사용은 이들 각각에 영향을 미칠 수 있습니다. 저는 앞선 절들에서 여러분을 도울 수 있는 상당히 많은 기법들을 논의했습니다. 하지만 성공했는지 어떻게 알 수 있을까요? 그 답은 명확하지 않지만, 이 절은 여러분이 그것을 발견하는 데 도움이 될 수 있습니다.
+
+동시성이 유용성(usefulness)에 영향을 미칠 수 있는 부분은 라이브러리 패키지에 대한 인터페이스 설계입니다. 호출자(caller)가 여러 스레드를 사용할 것이라고 가정하고 인터페이스를 설계해야 합니다. 즉, 각 프로시저가 즉시 중앙 뮤텍스를 잠그는 것을 의미하더라도, 모든 진입점(entry point)이 스레드 재진입 가능(thread re-entrant)해야 합니다(즉, 여러 스레드에 의해 동시에 호출될 수 있어야 함). 결과를 공유 전역 변수나 전역 정적 할당 저장소(global statically allocated storage)에 반환해서는 안 됩니다. 호출은 동기적(synchronous)이어야 하며, 결과를 사용할 수 있을 때까지 반환되지 않아야 합니다. 호출자가 그동안 다른 작업을 수행하려면 다른 스레드에서 할 수 있습니다. 현재 인터페이스의 멀티스레드 클라이언트가 없더라도, 미래의 문제를 피하기 위해 이러한 지침을 따를 것을 강력히 권장합니다.
+
+"올바른(correct)"이란 프로그램이 최종적으로 답을 낼 경우, 그것이 명세(specification)에 정의된 바로 그 답이어야 함을 의미합니다. 프로그래밍 환경은 순차적 프로그램에 대해 이미 제공하는 것 이상으로 여기서 많은 도움을 주지는 못할 것입니다. 대부분, 각 데이터 조각을 하나의(그리고 오직 하나의) 뮤텍스와 연관시키는 데 세심해야 합니다. 이에 지속적인 주의를 기울이지 않는다면, 작업은 희망이 없을 것입니다. 뮤텍스를 올바르게 사용하고, 항상 권장 스타일("Wait"에서 반환된 후 불리언 표현식을 다시 테스트하는)로 조건 변수를 사용한다면, 잘못될 가능성은 낮습니다.
+
+"활성(live)"이란 프로그램이 결국 답을 낼 것이라는 의미입니다. 그 대안은 무한 루프(infinite loop)나 교착 상태(deadlock)입니다. 무한 루프에 대해서는 도와드릴 수 없습니다. 앞선 절들의 힌트들이 교착 상태를 피하는 데 도움이 될 것이라고 믿습니다. 하지만 실패하여 교착 상태가 발생하더라도, 감지하는 것은 상당히 쉬울 것입니다. 교착 상태 분석에 주요 도움은 심볼릭 디버거(symbolic debugger)에서 얻을 수 있습니다. 디버거는 최소한 스레드에 대한 기본 지원(존재하는 스레드 열거 및 각 스레드의 스택 확인)을 제공해야 합니다. 바라건대, 디버거는 스레드 열거에 필터링 기능도 제공할 것입니다. 예를 들어, 특정 모듈에 스택 프레임이 있는 모든 스레드를 찾거나,
+
+================================================================================
+
+===== Page 33 (원문) =====
+
+module, or finding all threads that are blocked on a particular mutex or condition variable. A very nice feature would be a facility to determine which thread is holding a particular mutex.
+
+By "efficient", I mean that your program will make good use of the available computer resources, and therefore will produce its answer quickly. Again, the hints in the previous sections should help you to avoid the problem of concurrency adversely affecting your performance. And again, your programming environment needs to give you some help. Performance bugs are the most insidious of problems, since you might not even notice that you have them. The sort of information you need to obtain includes statistics on lock conflicts (for example, how often threads have had to block on this mutex, and how long they then had to wait) and on concurrency levels (for example, what was the average number of threads ready to execute in your program, or what percentage of the time were "n" threads ready).
+
+One final warning: don't emphasize efficiency at the expense of correctness. It is much easier to start with a correct program and work on making it efficient, than to start with an efficient program and work on making it correct.
+
+===== Page 33 (번역) =====
+
+특정 뮤텍스나 조건 변수에 블록된 모든 스레드를 찾는 기능 같은 것입니다. 특정 뮤텍스를 어떤 스레드가 보유하고 있는지 확인하는 기능은 아주 좋은 기능이 될 것입니다.
+
+"효율적(efficient)"이란 프로그램이 사용 가능한 컴퓨터 자원을 잘 활용하여, 따라서 빠르게 답을 낼 것이라는 의미입니다. 다시 한번, 앞선 절들의 힌트들이 동시성이 성능에 악영향을 미치는 문제를 피하는 데 도움이 될 것입니다. 그리고 다시 한번, 프로그래밍 환경이 약간의 도움을 주어야 합니다. 성능 버그(performance bug)는 가장 교묘한 문제인데, 그 존재조차 인지하지 못할 수 있기 때문입니다. 여러분이 얻어야 할 정보의 종류에는 잠금 충돌(lock conflicts)에 대한 통계(예: 스레드가 이 뮤텍스에서 얼마나 자주 블록되어야 했는지, 그리고 얼마나 오래 기다려야 했는지)와 동시성 수준(concurrency levels)에 대한 통계(예: 프로그램에서 실행 준비가 된 스레드의 평균 개수, 또는 "n"개의 스레드가 준비된 시간의 백분율)가 포함됩니다.
+
+마지막 경고: 올바름(correctness)을 희생하면서 효율성(efficiency)을 강조하지 마십시오. 효율적인 프로그램으로 시작하여 올바르게 만드는 것보다, 올바른 프로그램으로 시작하여 효율적으로 만드는 것이 훨씬 쉽습니다.
+
+================================================================================

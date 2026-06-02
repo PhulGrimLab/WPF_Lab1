@@ -1,0 +1,281 @@
+================================================================================
+파일명: Chapter6_USING_FORK_번역.txt
+================================================================================
+
+===== Page 25 (원문) =====
+
+## USING FORK: WORKING IN PARALLEL
+
+As we discussed earlier, there are several classes of situations where you will want to fork a thread: to utilize a multi- processor; to do useful work while waiting for a slow device; to satisfy human users by working on several actions at once; to provide network service to multiple clients simultaneously; and to defer work until a less busy time.
+
+It is quite common to find straightforward application programs using several threads. For example, you might have one thread doing your main computation, a second thread writing some output to a file, a third thread waiting for (or responding to) interactive user input, and a fourth thread running in background to clean up your data structures (for example, re- balancing a tree). In the programs we build at SRC, several of our library packages fork threads internally.
+
+When you are programming with threads, you usually drive slow devices through synchronous library calls that suspend the calling thread until the device action completes, but allow other threads in your address space to continue. You will find no need to use older schemes for asynchronous operation (such as interrupts, Unix signals or VMS AST's). If you don't want to wait for the result of a device interaction, invoke it in a separate thread. If you want to have multiple device requests outstanding simultaneously, invoke them in multiple threads. If your operating system still delivers some asynchronous events through these older mechanisms, the runtime library supporting your threads facility should convert them into more appropriate mechanisms. See, for example, the design of the Topaz system calls [11] or the exception and trapping machinery included with Sun's lightweight process library [14,15].
+
+If your program is interacting with a human user, you will usually want it to be responsive even while it is working on some request. This is particularly true of window- oriented interfaces. It is particularly infuriating to the user if the interactive display goes dumb just because the database query is taking a long time. You can achieve responsiveness by using extra threads. Often, the designer of your window system will have already done this for you, and will always call your program in a separate thread. At other times, the window system will call your program in a single thread synchronously with the user input event. In this latter case, you must decide whether the requested action is short enough to do it synchronously, or whether you should fork a thread. The complexity introduced by using forked threads here is that you need to exercise a lot of care in accessing data from the interactive interface (for example, the value of the current selection, or the contents of editable text areas) since these values might change once you start executing asynchronously. This is a difficult design issue, and each window system tackles it differently. I have not yet seen a totally satisfactory design.
+
+Network servers are usually required to service multiple clients concurrently. If your network communication is based on RPC [3], this will happen without any work on your part, since the server side of your RPC system will invoke each concurrent incoming call in a separate thread, by forking a suitable number of threads internally to its implementation. But you can use multiple threads even with other communication paradigms. For example, in a traditional connection- oriented protocol (such as file transfer
+
+===== Page 25 (번역) =====
+
+## 포크 사용하기: 병렬 작업 (USING FORK: WORKING IN PARALLEL)
+
+앞서 논의했듯이, 스레드를 포크(fork)하고 싶은 상황에는 여러 부류가 있습니다: 멀티프로세서를 활용하기 위해; 느린 장치를 기다리는 동안 유용한 작업을 수행하기 위해; 여러 동작을 동시에 처리하여 인간 사용자를 만족시키기 위해; 여러 클라이언트에게 동시에 네트워크 서비스를 제공하기 위해; 그리고 작업을 덜 바쁜 시간으로 연기하기 위해.
+
+여러 스레드를 사용하는 간단한 응용 프로그램을 찾는 것은 매우 흔합니다. 예를 들어, 주요 계산을 수행하는 하나의 스레드, 출력을 파일에 쓰는 두 번째 스레드, 대화형 사용자 입력을 기다리거나(또는 응답하는) 세 번째 스레드, 그리고 백그라운드에서 실행되어 데이터 구조를 정리하는(예: 트리 재균형) 네 번째 스레드가 있을 수 있습니다. SRC에서 구축하는 프로그램에서는 여러 라이브러리 패키지가 내부적으로 스레드를 포크합니다.
+
+스레드로 프로그래밍할 때는 일반적으로 동기적(synchronous) 라이브러리 호출을 통해 느린 장치를 구동합니다. 이 호출은 장치 동작이 완료될 때까지 호출 스레드를 일시 중단하지만, 주소 공간 내의 다른 스레드들은 계속 실행되도록 허용합니다. 인터럽트(interrupt), Unix 시그널(signal), VMS AST와 같은 오래된 비동기(asynchronous) 방식은 사용할 필요가 없을 것입니다. 장치 상호작용의 결과를 기다리지 않으려면 별도의 스레드에서 호출하십시오. 여러 장치 요청을 동시에 미해결(outstanding) 상태로 유지하려면 여러 스레드에서 호출하십시오. 운영체제가 여전히 이러한 오래된 메커니즘을 통해 일부 비동기 이벤트를 전달한다면, 스레드 기능을 지원하는 런타임 라이브러리가 이를 더 적절한 메커니즘으로 변환해야 합니다. 예를 들어, Topaz 시스템 호출의 설계 [11] 또는 Sun의 경량 프로세스 라이브러리에 포함된 예외 및 트래핑(trapping) 메커니즘 [14,15]을 참조하십시오.
+
+프로그램이 인간 사용자와 상호작용하는 경우, 일반적으로 어떤 요청을 처리하는 중에도 응답성(responsive)을 유지하기를 원합니다. 이는 특히 윈도우 기반 인터페이스에서 더욱 그렇습니다. 데이터베이스 질의가 오래 걸린다는 이유만으로 대화형 디스플레이가 멍청하게 되는 것은 사용자에게 특히 짜증나는 일입니다. 추가 스레드를 사용하면 응답성을 달성할 수 있습니다. 종종 윈도우 시스템 설계자가 이미 이를 대신 처리하여 항상 별도의 스레드에서 프로그램을 호출할 것입니다. 다른 경우에는 윈도우 시스템이 사용자 입력 이벤트와 동기적으로 단일 스레드에서 프로그램을 호출할 수 있습니다. 이 후자의 경우, 요청된 동작이 동기적으로 수행하기에 충분히 짧은지, 아니면 스레드를 포크해야 하는지 결정해야 합니다. 여기서 포크된 스레드를 사용함으로써 발생하는 복잡성은 대화형 인터페이스의 데이터(예: 현재 선택 항목의 값, 편집 가능한 텍스트 영역의 내용)에 접근할 때 많은 주의를 기울여야 한다는 것입니다. 왜냐하면 비동기적으로 실행을 시작하면 이러한 값들이 변경될 수 있기 때문입니다. 이는 어려운 설계 문제이며, 각 윈도우 시스템마다 다르게 처리합니다. 저는 아직 완전히 만족스러운 설계를 보지 못했습니다.
+
+네트워크 서버는 일반적으로 여러 클라이언트를 동시에 서비스해야 합니다. 네트워크 통신이 RPC [3]에 기반한다면, RPC 시스템의 서버 측이 구현 내부에서 적절한 수의 스레드를 포크하여 각각의 동시적 incoming 호출을 별도의 스레드에서 호출할 것이므로, 별도의 작업 없이도 이를 처리할 수 있습니다. 그러나 다른 통신 패러다임에서도 여러 스레드를 사용할 수 있습니다. 예를 들어, 전통적인 연결 지향 프로토콜(connection-oriented protocol) (예: TCP 위에 계층화된 파일 전송)
+
+================================================================================
+
+===== Page 26 (원문) =====
+
+layered on top of TCP), you should probably fork one thread for each incoming connection. Conversely, if you are writing a client program and you don't want to wait for the reply from a network server, invoke the server from a separate thread.
+
+The technique of adding threads in order to defer work is quite valuable. There are several variants of the scheme. The simplest is that as soon as your procedure has done enough work to compute its result, you fork a thread to do the remainder of the work, and then return to your caller in the original thread. This reduces the latency of your procedure (the elapsed time from being called to returning), in the hope that the deferred work can be done more cheaply later (for example, because a processor goes idle). The disadvantage of this simplest approach is that it might create large numbers of threads, and it incurs the cost of calling "Fork" each time. Often, it is preferable to keep a single housekeeping thread and feed requests to it. It's even better when the housekeeper doesn't need any information from the main threads, beyond the fact that there is work to be done. For example, this will be true when the housekeeper is responsible for maintaining a data structure in an optimal form, although the main threads will still get the correct answer without this optimization. An additional technique here is to program the housekeeper either to merge similar requests into a single action, or to restrict itself to run not more often than a chosen periodic interval.
+
+On a multi- processor you will want to use "Fork" in order to utilize as many of your processors as you can. There isn't much general advice I can give here—mostly, the decisions about when and what to fork are too problem- specific. One general technique is pipelining, which I discuss in the next section.
+
+## Pipelining
+
+On a multi- processor, there is one specialized use of additional threads that is particularly valuable. You can build a chain of producer- consumer relationships, known as a pipeline. For example, when thread A initiates an action, all it does is enqueue a request in a buffer. Thread B takes the action from the buffer, performs part of the work, then enqueues it in a second buffer. Thread C takes it from there and does the rest of the work. This forms a three- stage pipeline. The three threads operate in parallel except when they synchronize to access the buffers, so this pipeline is capable of utilizing up to three processors. At its best, pipelining can achieve almost linear speed- up and can fully utilize a multi- processor. A pipeline can also be useful on a uni- processor if each thread will encounter some real- time delays (such as page faults, device handling or network communication).
+
+For example, the following program fragment implements a simple three stage pipeline. An action is initiated by calling "PaintChar". One auxiliary thread executes in "Rasterize" and another in "Painter". The pipeline stages communicate through unbounded buffers implemented as linked lists whose last elements are "rasterTail" and "paintTail". The initial values of the tails are dummy elements, to make the program simpler.
+
+TYPE RasterList = REF RECORD ch: CHAR; next: RasterList END;
+TYPE PaintList = REF RECORD r: Bitmap; next: PaintList END;
+VAR rasterTail: RasterList;
+VAR paintTail: PaintList;
+VAR m: Thread.Mutex;
+VAR c1, c2: Thread.Condition;
+
+===== Page 26 (번역) =====
+
+(TCP 위에 계층화된)에서는 각 incoming 연결에 대해 하나의 스레드를 포크해야 할 것입니다. 반대로, 클라이언트 프로그램을 작성 중이고 네트워크 서버로부터의 응답을 기다리지 않으려면, 별도의 스레드에서 서버를 호출하십시오.
+
+작업을 연기하기 위해 스레드를 추가하는 기법은 매우 가치 있습니다. 이 방식에는 여러 변형이 있습니다. 가장 간단한 방법은 프로시저가 결과를 계산하기에 충분한 작업을 수행하자마자, 나머지 작업을 수행할 스레드를 포크한 다음, 원래 스레드에서 호출자에게 반환하는 것입니다. 이는 프로시저의 지연 시간(latency) (호출되어 반환될 때까지 경과된 시간)을 줄여주며, 연기된 작업이 나중에 (예: 프로세서가 유휴 상태가 되어) 더 저렴하게 수행될 수 있기를 기대합니다. 이 가장 간단한 접근 방식의 단점은 많은 수의 스레드를 생성할 수 있고, 매번 "Fork"를 호출하는 비용이 든다는 것입니다. 종종 단일 가사 관리(housekeeping) 스레드를 유지하고 여기에 요청을 제공하는 것이 더 좋습니다. 가사 관리자가 수행할 작업이 있다는 사실 외에 메인 스레드들로부터 어떤 정보도 필요하지 않을 때는 더욱 좋습니다. 예를 들어, 가사 관리자가 데이터 구조를 최적의 형태로 유지하는 책임이 있을 때(메인 스레드들이 이 최적화 없이도 올바른 결과를 얻을 수 있음) 이는 사실입니다. 여기에 추가 기법으로는 가사 관리자가 유사한 요청들을 단일 동작으로 병합하거나, 선택된 주기적 간격보다 더 자주 실행되지 않도록 제한하는 방식으로 프로그래밍하는 것입니다.
+
+멀티프로세서에서는 최대한 많은 프로세서를 활용하기 위해 "Fork"를 사용하고 싶을 것입니다. 여기서 제가 드릴 수 있는 일반적인 조언은 많지 않습니다. 언제, 무엇을 포크할지에 대한 결정은 대부분 문제에 매우 특화되어 있습니다. 한 가지 일반적인 기법은 파이프라이닝(pipelining)이며, 이는 다음 절에서 논의하겠습니다.
+
+## 파이프라이닝 (Pipelining)
+
+멀티프로세서에서는 추가 스레드의 특별한 용도 중 하나가 특히 가치 있습니다. 파이프라인(pipeline)이라고 알려진 생산자-소비자 관계의 체인을 구축할 수 있습니다. 예를 들어, 스레드 A가 동작을 시작하면, 하는 일이라고는 버퍼에 요청을 넣는(enqueue) 것뿐입니다. 스레드 B는 버퍼에서 요청을 가져와 작업의 일부를 수행한 다음, 두 번째 버퍼에 넣습니다. 스레드 C는 거기서 가져와 나머지 작업을 수행합니다. 이것은 3단계 파이프라인을 형성합니다. 세 스레드는 버퍼에 접근하기 위해 동기화할 때를 제외하고는 병렬로 작동하므로, 이 파이프라인은 최대 3개의 프로세서를 활용할 수 있습니다. 최상의 경우, 파이프라인은 거의 선형적인 속도 향상(linear speed-up)을 달성할 수 있고 멀티프로세서를 완전히 활용할 수 있습니다. 파이프라인은 각 스레드가 어떤 실시간 지연(예: 페이지 폴트, 장치 처리 또는 네트워크 통신)을 만나게 되는 경우 단일 프로세서에서도 유용할 수 있습니다.
+
+예를 들어, 다음 프로그램 조각은 간단한 3단계 파이프라인을 구현합니다. "PaintChar"를 호출하여 동작이 시작됩니다. 하나의 보조 스레드는 "Rasterize"에서 실행되고, 다른 하나는 "Painter"에서 실행됩니다. 파이프라인 단계들은 마지막 요소가 "rasterTail"과 "paintTail"인 연결 리스트로 구현된 무제한 버퍼를 통해 통신합니다. 테일(tail)의 초기 값은 프로그램을 단순하게 만들기 위한 더미(dummy) 요소입니다.
+
+TYPE RasterList = REF RECORD ch: CHAR; next: RasterList END;
+TYPE PaintList = REF RECORD r: Bitmap; next: PaintList END;
+VAR rasterTail: RasterList;
+VAR paintTail: PaintList;
+VAR m: Thread.Mutex;
+VAR c1, c2: Thread.Condition;
+
+================================================================================
+
+===== Page 27 (원문) =====
+
+23
+
+PROCEDURE PaintChar(arg: CHAR);
+VAR this: RasterList;
+BEGIN
+NEW(this);
+this^.ch := arg;
+this^.next := NIL;
+(* Enqueue request for Rasterize thread .... *)
+LOCK m DO
+rasterTail^.next := this;
+rasterTail := this;
+END;
+Thread.Signal(c1);
+(* Now return to our caller .... *)
+END PaintChar;
+
+PROCEDURE Rasterize (init: RasterList);
+VAR last: RasterList;
+VAR this: PaintList;
+BEGIN
+last := init;
+LOOP
+(* Wait for RasterList request and dequeue it .... *)
+LOCK m DO
+WHILE last^.next = NIL DO
+Thread.Wait(m, c1);
+END;
+last := last^.next;
+END;
+(* Convert character to bitmap .... *)
+NEW(this);
+this^.bitmap := Font.Map(last^.ch);
+this^.next := NIL;
+(* Enqueue request for painter thread .... *)
+LOCK m DO
+paintTail^.next := this;
+paintTail := this;
+END;
+Thread.Signal(c2);
+END;
+END Rasterize;
+PROCEDURE Painter (init: PaintList);
+VAR last: PaintList;
+BEGIN
+last := init;
+LOOP
+(* Wait for PaintList request and dequeue it .... *)
+LOCK m DO
+WHILE last^.next = NIL DO
+Thread.Wait(m, c2);
+END;
+END;
+
+===== Page 27 (번역) =====
+
+23
+
+PROCEDURE PaintChar(arg: CHAR);
+VAR this: RasterList;
+BEGIN
+NEW(this);
+this^.ch := arg;
+this^.next := NIL;
+(* Rasterize 스레드를 위한 요청을 큐에 넣음 .... *)
+LOCK m DO
+rasterTail^.next := this;
+rasterTail := this;
+END;
+Thread.Signal(c1);
+(* 이제 호출자에게 반환 .... *)
+END PaintChar;
+
+PROCEDURE Rasterize (init: RasterList);
+VAR last: RasterList;
+VAR this: PaintList;
+BEGIN
+last := init;
+LOOP
+(* RasterList 요청을 기다리고 큐에서 제거(dequeue) .... *)
+LOCK m DO
+WHILE last^.next = NIL DO
+Thread.Wait(m, c1);
+END;
+last := last^.next;
+END;
+(* 문자를 비트맵(bitmap)으로 변환 .... *)
+NEW(this);
+this^.bitmap := Font.Map(last^.ch);
+this^.next := NIL;
+(* painter 스레드를 위한 요청을 큐에 넣음 .... *)
+LOCK m DO
+paintTail^.next := this;
+paintTail := this;
+END;
+Thread.Signal(c2);
+END;
+END Rasterize;
+PROCEDURE Painter (init: PaintList);
+VAR last: PaintList;
+BEGIN
+last := init;
+LOOP
+(* PaintList 요청을 기다리고 큐에서 제거 .... *)
+LOCK m DO
+WHILE last^.next = NIL DO
+Thread.Wait(m, c2);
+END;
+END;
+
+================================================================================
+
+===== Page 28 (원문) =====
+
+24␣␣␣␣␣.␣␣␣␣␣An Introduction to Programming with Threads
+(* Paint the bitmap .... *)
+Display.PaintBitmap(last^.bitmap);
+END;
+END Painter;
+NEW(rasterTail); rasterTail.next := NIL;
+NEW(paintTail); paintTail.next := NIL;
+Thread.Fork(Rasterize, rasterTail);
+Thread.Fork(Painter, paintTail);
+There are two problems with pipelining. First, you need to be careful about how
+much of the work gets done in each stage. The ideal is that the stages are equal: this will
+provide maximum throughput, by utilizing all your processors fully. Achieving this ideal
+requires hand tuning, and re-tuning as the program changes. Second, the number of stages
+in your pipeline determines statically the amount of concurrency. If you know how many
+processors you have, and exactly where the real-time delays occur, this will be fine. For
+more flexible or portable environments it can be a problem. Despite these problems,
+pipelining is a powerful technique that has wide applicability.
+The impact of your environment
+The design of your operating system and runtime libraries will affect the extent to which
+it is desirable or useful to fork threads. Your operating system should not suspend the
+entire address space just because one thread is blocked for an i/o request (or for a page
+fault). Your operating system and your libraries must permit calls from multiple threads
+in parallel. Generally, in a well-designed environment for supporting multi-threaded
+programs you will find that the facilities of your operating system and libraries are
+available as synchronous calls that block only the calling thread [11].
+You will need to know some of the performance parameters of your threads
+implementation. What is the cost of creating a thread? What is the cost of keeping a
+blocked thread in existence? What is the cost of a context switch? What is the cost of a
+LOCK clause when the mutex is not locked? Knowing these, you will be able to decide to
+what extent it is feasible or useful to add extra threads to your program.
+Potential problems with adding threads
+You need to exercise a little care in adding threads, or you will find that your program
+runs slower instead of faster.
+If you have significantly more threads ready to run than there are processors, you will
+usually find that your performance degrades. This is partly because most thread schedulers
+are quite slow at making general re-scheduling decisions. If there is a processor idle
+waiting for your thread, the scheduler can probably get it there quite quickly. But if your
+thread has to be put on a queue, and later swapped into a processor in place of some other
+thread, it will be more expensive. A second effect is that if you have lots of threads
+running they are more likely to conflict over mutexes or over the resources managed by
+your condition variables.
+Mostly, when you add threads just to improve your program's structure (for example
+driving slow devices, or responding to mouse clicks speedily, or for RPC invocations)
+
+===== Page 28 (번역) =====
+
+24␣␣␣␣␣.␣␣␣␣␣An Introduction to Programming with Threads
+(* 비트맵을 그림 .... *)
+Display.PaintBitmap(last^.bitmap);
+END;
+END Painter;
+NEW(rasterTail); rasterTail.next := NIL;
+NEW(paintTail); paintTail.next := NIL;
+Thread.Fork(Rasterize, rasterTail);
+Thread.Fork(Painter, paintTail);
+파이프라이닝에는 두 가지 문제가 있습니다. 첫째, 각 단계에서 얼마나 많은 작업이 수행되는지 주의해야 합니다. 이상적으로는 단계들이 균등해야 합니다. 그래야 모든 프로세서를 완전히 활용하여 최대 처리량(throughput)을 제공합니다. 이 이상을 달성하려면 수동 튜닝(hand tuning)과 프로그램 변경에 따른 재튜닝(re-tuning)이 필요합니다. 둘째, 파이프라인의 단계 수는 동시성의 양을 정적으로 결정합니다. 프로세서가 몇 개인지, 그리고 실시간 지연이 정확히 어디서 발생하는지 알고 있다면 문제가 되지 않습니다. 더 유연하거나 이식 가능한 환경에서는 문제가 될 수 있습니다. 이러한 문제들에도 불구하고, 파이프라이닝은 광범위하게 적용 가능한 강력한 기법입니다.
+환경의 영향 (The impact of your environment)
+운영체제와 런타임 라이브러리의 설계는 스레드를 포크하는 것이 바람직하거나 유용한 정도에 영향을 미칠 것입니다. 운영체제는 단지 하나의 스레드가 I/O 요청(또는 페이지 폴트)으로 블록되었다고 해서 전체 주소 공간을 중단시켜서는 안 됩니다. 운영체제와 라이브러리는 여러 스레드로부터의 병렬 호출을 허용해야 합니다. 일반적으로 멀티스레드 프로그램을 지원하기 위해 잘 설계된 환경에서는 운영체제와 라이브러리의 기능들이 호출 스레드만 블록시키는 동기적 호출(synchronous call)로 제공된다는 것을 알게 될 것입니다 [11].
+스레드 구현의 몇 가지 성능 매개변수(performance parameter)를 알아야 할 것입니다. 스레드를 생성하는 비용은 얼마인가? 블록된 스레드를 유지하는 비용은 얼마인가? 컨텍스트 스위치(context switch) 비용은 얼마인가? 뮤텍스가 잠겨 있지 않을 때 LOCK 절의 비용은 얼마인가? 이것들을 알면, 프로그램에 추가 스레드를 얼마나 추가하는 것이 실현 가능하거나 유용한지 결정할 수 있을 것입니다.
+스레드 추가의 잠재적 문제점 (Potential problems with adding threads)
+스레드를 추가할 때 약간의 주의를 기울여야 합니다. 그렇지 않으면 프로그램이 더 빨라지지 않고 오히려 느려지는 것을 발견할 것입니다.
+실행 준비가 된(ready to run) 스레드가 프로세서 수보다 훨씬 많으면, 일반적으로 성능이 저하됩니다. 이는 부분적으로 대부분의 스레드 스케줄러가 일반적인 재스케줄링 결정을 내리는 데 상당히 느리기 때문입니다. 스레드를 기다리는 유휴 프로세서가 있다면, 스케줄러는 아마 그 스레드를 매우 빠르게 할당할 수 있습니다. 그러나 스레드를 큐에 넣었다가 나중에 다른 스레드 대신 프로세서로 교체(swap)해야 한다면, 더 많은 비용이 듭니다. 두 번째 영향은 실행 중인 스레드가 많으면 뮤텍스나 조건 변수가 관리하는 자원에 대해 충돌할 가능성이 더 높아진다는 것입니다.
+대부분 프로그램의 구조를 개선하기 위해(예: 느린 장치 구동, 마우스 클릭에 빠르게 응답, RPC 호출) 스레드를 추가할 때는
+
+================================================================================
+
+===== Page 29 (원문) =====
+
+you will not encounter this problem; but when you add threads for performance purposes (such as performing multiple actions in parallel, or deferring work, or utilizing multiprocessors), you will need to worry whether you are overloading the system.
+
+But let me stress that this warning applies only to the threads that are ready to run. The expense of having threads blocked on condition variables is usually less significant, being just the memory used for scheduler data structures and the thread stack. The programs at SRC often have quite a large number of blocked threads. (50 is not uncommon in application programs; there are usually hundreds blocked inside the operating system—even on personal workstations.)
+
+In most systems the thread creation and termination facilities are not cheap. Your threads implementation will probably take care to cache a few terminated thread carcasses, so that you don't pay for stack creation on each fork, but nevertheless a call of "Fork" will probably incur a total cost of about two or three re- scheduling decisions. So you shouldn't fork too small a computation into a separate thread. One useful measure of a threads implementation on a multi- processor is the smallest computation for which it is profitable to fork a thread.
+
+Despite these cautions, be aware that our experience at SRC running multi- threaded applications on a 5- way multi- processor has been that programmers are as likely to err by creating too few threads as by creating too many.
+
+===== Page 29 (번역) =====
+
+이 문제를 만나지 않을 것입니다. 그러나 성능 목적(예: 여러 동작 병렬 수행, 작업 연기, 멀티프로세서 활용)으로 스레드를 추가할 때는 시스템에 과부하를 주는지 걱정해야 할 것입니다.
+
+그러나 이 경고는 실행 준비가 된(ready to run) 스레드에만 적용된다는 점을 강조하고 싶습니다. 조건 변수에 블록된 스레드를 유지하는 비용은 일반적으로 덜 중요하며, 단지 스케줄러 데이터 구조와 스레드 스택에 사용되는 메모리일 뿐입니다. SRC의 프로그램들은 종종 상당히 많은 수의 블록된 스레드를 가지고 있습니다. (응용 프로그램에서 50개는 흔하지 않으며, 개인 워크스테이션에서도 운영체제 내부에는 일반적으로 수백 개가 블록되어 있습니다.)
+
+대부분의 시스템에서 스레드 생성 및 종료 기능은 저렴하지 않습니다. 스레드 구현은 아마 종료된 스레드의 '시체(carcass)' 몇 개를 캐싱하여 매 포크마다 스택 생성을 위한 비용을 지불하지 않도록 할 것입니다. 그럼에도 불구하고 "Fork" 호출은 아마 총 약 2~3회의 재스케줄링 결정 비용을 초래할 것입니다. 따라서 너무 작은 계산을 별도의 스레드로 포크해서는 안 됩니다. 멀티프로세서에서 스레드 구현의 유용한 측정 기준 중 하나는 스레드를 포크하는 것이 이익이 되는 가장 작은 계산의 크기입니다.
+
+이러한 주의사항에도 불구하고, SRC에서 5-way 멀티프로세서 상에서 멀티스레드 애플리케이션을 실행한 경험에 따르면, 프로그래머들은 스레드를 너무 많이 생성하여 실수하는 것만큼이나 너무 적게 생성하여 실수하는 경우도 많다는 점을 인지하시기 바랍니다.
+
+================================================================================

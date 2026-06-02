@@ -1,0 +1,135 @@
+================================================================================
+파일명: Chapter1_INTRODUCTION_번역.txt
+================================================================================
+
+===== Page 1 (원문) =====
+
+3 5
+
+# An Introduction to Programming with Threads
+
+by Andrew D. Birrell
+
+January 6, 1989
+
+===== Page 1 (번역) =====
+
+3 5
+
+# 스레드 프로그래밍 입문
+
+앤드류 D. 버렐 (Andrew D. Birrell)
+
+1989년 1월 6일
+
+================================================================================
+
+===== Page 5 (원문) =====
+
+1
+
+## INTRODUCTION
+
+Many experimental operating systems, and some commercial ones, have recently included support for concurrent programming. The most popular mechanism for this is some provision for allowing multiple lightweight "threads" within a single address space, used from within a single program.1
+
+Programming with threads introduces new difficulties even for experienced programmers. Concurrent programming has techniques and pitfalls that do not occur in sequential programming. Many of the techniques are obvious, but some are obvious only with hindsight. Some of the pitfalls are comfortable (for example, deadlock is a pleasant sort of bug—your program stops with all the evidence intact), but some take the form of insidious performance penalties.
+
+The purpose of this paper is to give you an introduction to the programming techniques that work well with threads, and to warn you about techniques or interactions that work out badly. It should provide the experienced sequential programmer with enough hints to be able to build a substantial multi- threaded program that works—correctly, efficiently, and with a minimum of surprises.
+
+A "thread" is a straightforward concept: a single sequential flow of control. In a high- level language you normally program a thread using procedures, where the procedure calls follow the traditional stack discipline. Within a single thread, there is at any instant a single point of execution. The programmer need learn nothing new to use a single thread.
+
+Having "multiple threads" in a program means that at any instant the program has multiple points of execution, one in each of its threads. The programmer can mostly view the threads as executing simultaneously, as if the computer were endowed with as many processors as there are threads. The programmer is required to decide when and where to create multiple threads, or to accept such decisions made for him by implementers of existing library packages or runtime systems. Additionally, the programmer must occasionally be aware that the computer might not in fact execute all his threads simultaneously.
+
+Having the threads execute within a "single address space" means that the computer's addressing hardware is configured so as to permit the threads to read and write the same memory locations. In a high- level language, this usually corresponds to the fact that the off- stack (global) variables are shared among all the threads of the program. Each thread executes on a separate call stack with its own separate local variables. The programmer is responsible for using the synchronization mechanisms of the thread facility to ensure that the shared memory is accessed in a manner that will give the correct answer.
+
+Thread facilities are always advertised as being "lightweight". This means that thread creation, existence, destruction and synchronization primitives are cheap enough that the programmer will use them for all his concurrency needs.
+
+Please be aware that I am presenting you with a selective, biased and idiosyncratic collection of techniques. Selective, because an exhaustive survey would be premature, and would be too exhausting to serve as an introduction—I will be discussing only the most important thread primitives, omitting features such as per- thread context information. Biased, because I present examples, problems and solutions in the context of one
+
+===== Page 5 (번역) =====
+
+1
+
+## 소개 (INTRODUCTION)
+
+최근 많은 실험용 운영체제와 일부 상업용 운영체제들이 동시성 프로그래밍을 지원하기 위한 기능을 포함하기 시작했습니다. 이를 위한 가장 대중적인 메커니즘은 하나의 프로그램 내에서 사용되는, 하나의 주소 공간 안에 여러 개의 경량 "스레드(thread)"를 허용하는 것입니다.1
+
+스레드를 사용한 프로그래밍은 경험 많은 프로그래머에게도 새로운 어려움을 안겨줍니다. 동시성 프로그래밍에는 순차적 프로그래밍에서는 존재하지 않는 기법과 함정이 있습니다. 많은 기법들은 명백하지만, 어떤 것들은 결과를 알고 나서야 명백해집니다. 어떤 함정들은 다루기 편한 편입니다(예를 들어, 교착 상태(deadlock)는 모든 증거가 그대로 남은 채 프로그램이 멈추기 때문에 꽤 다루기 쉬운 버그입니다). 그러나 어떤 함정들은 교묘한 성능 저하의 형태를 띱니다.
+
+이 논문의 목적은 스레드와 잘 작동하는 프로그래밍 기법을 소개하고, 제대로 작동하지 않는 기법이나 상호 작용에 대해 경고하는 것입니다. 이 논문은 경험 있는 순차 프로그래머가 올바르고, 효율적이며, 놀라움을 최소화하면서 작동하는 실질적인 멀티스레드 프로그램을 구축할 수 있는 충분한 힌트를 제공할 것입니다.
+
+"스레드"는 간단한 개념입니다: 하나의 단일 순차적 실행 흐름입니다. 고수준 언어에서는 일반적으로 프로시저(procedure)를 사용하여 스레드를 프로그래밍하며, 프로시저 호출은 전통적인 스택 규율(stack discipline)을 따릅니다. 하나의 스레드 내에서는 어느 순간에도 단 하나의 실행 지점이 존재합니다. 프로그래머는 단일 스레드를 사용하기 위해 새로운 것을 배울 필요가 없습니다.
+
+프로그램에 "여러 스레드"가 있다는 것은, 어느 순간에든 프로그램이 각 스레드마다 하나씩, 여러 개의 실행 지점을 가진다는 것을 의미합니다. 프로그래머는 대개 컴퓨터에 스레드 개수만큼의 프로세서가 있는 것처럼 스레드가 동시에 실행되는 것으로 간주할 수 있습니다. 프로그래머는 언제, 어디서 여러 스레드를 생성할지 결정하거나, 기존 라이브러리 패키지나 런타임 시스템 구현자가 대신 결정한 것을 받아들여야 합니다. 또한 프로그래머는 때때로 컴퓨터가 실제로 자신의 모든 스레드를 동시에 실행하지 못할 수도 있다는 점을 인지해야 합니다.
+
+스레드가 "단일 주소 공간(single address space)" 내에서 실행된다는 것은, 컴퓨터의 주소 지정 하드웨어가 스레드들이 동일한 메모리 위치를 읽고 쓸 수 있도록 구성되어 있음을 의미합니다. 고수준 언어에서 이는 일반적으로 스택에 있지 않은 (전역) 변수가 프로그램의 모든 스레드 간에 공유된다는 사실에 해당합니다. 각 스레드는 자신만의 별도 로컬 변수를 가진 별도의 호출 스택(call stack)에서 실행됩니다. 프로그래머는 스레드 기능의 동기화 메커니즘을 사용하여 공유 메모리가 올바른 결과를 내는 방식으로 접근되도록 해야 할 책임이 있습니다.
+
+스레드 기능은 항상 "경량(lightweight)"이라고 홍보됩니다. 이는 스레드 생성, 존재, 소멸 및 동기화 기본 연산(primitive)이 충분히 저렴하여 프로그래머가 모든 동시성 필요에 대해 이를 사용할 것임을 의미합니다.
+
+제가 선택적이고, 편향적이며, 독특한 기법들을 모아서 제시하고 있다는 점을 인지해 주시기 바랍니다. '선택적'이라는 것은, 완전한 조사는 시기상조일 뿐만 아니라 서론으로서 너무 지루할 것이기 때문입니다. 저는 스레드별 컨텍스트 정보와 같은 기능은 생략하고, 가장 중요한 스레드 기본 연산들만 논의할 것입니다. '편향적'이라는 것은, 제가 한 특정 설계 선택의 맥락에서 예제, 문제 및 해결책을 제시하기 때문입니다.
+
+================================================================================
+
+===== Page 6 (원문) =====
+
+2 - An Introduction to Programming with Threads
+
+particular set of choices of how to design a threads facility- the choices we made in the Topaz system at Digital's Systems Research Center (SRC). Idiosyncratic, because the techniques presented here derive from my personal experience of programming with threads over the last ten years- I have not attempted to represent colleagues who might have different opinions about which programming techniques are "good" or "important." Nevertheless, I believe that an understanding of the ideas presented here will serve as a sound basis for programming with concurrent threads.
+
+Throughout the paper I use examples written in Modula- 2+ [12]. These should be readily understandable by anyone familiar with the Algol and Pascal family of languages. The examples are intended to illustrate points about concurrency and synchronization- don't try to use these actual algorithms in real programs.
+
+Threads are not a tool for automatic parallel decomposition, where a compiler will take a visibly sequential program and generate object code to utilize multiple processors. That is an entirely different art, not one that I will discuss here.
+
+## WHY USE CONCURRENCY?
+
+Life would be simpler if you didn't need to use concurrency. But there are a variety of forces pushing towards its use. The most recent is the advent of multi- processors. With these machines, there really are multiple simultaneous points of execution, and threads are an attractive tool for allowing a program to take advantage of the available hardware. The alternative, with most conventional operating systems, is to configure your program as multiple separate processes, running in separate address spaces. This tends to be expensive to set up, and the costs of communicating between address spaces are often high, even in the presence of shared segments. By using a lightweight multi- threading facility, the programmer can utilize the processors cheaply. This seems to work well in systems having up to about 10 processors, rather than 1000 processors.
+
+A second area where threads are useful is in driving slow devices such as disks, networks, terminals and printers. In these cases an efficient program should be doing some other useful work while waiting for the device to produce its next event (such as the completion of a disk transfer or the receipt of a packet from the network). As we will see later, this can be programmed quite easily with threads by adopting an attitude that device requests are all sequential (i.e. they suspend execution of the invoking thread until the request completes), and that the program meanwhile does other work in other threads.
+
+A third source of concurrency is human users. Humans are actually quite good at doing two or three things at a time, and seem to get offended if their computer cannot do as much. Again, threads are a convenient way of programming this. The typical arrangement of a modern window system is that each time the user invokes an action (by clicking a button with the mouse, for example), a separate thread is used to implement the action. If the user invokes multiple actions, multiple threads will perform them in parallel. (Note that the implementation of the window system probably also uses a thread to watch the mouse actions themselves, since the mouse is an example of a slow device.)
+
+A final source of concurrency appears when building a distributed system. Here we frequently encounter shared network servers (such as a file server or a spooling print server), where the server is willing to service requests from multiple clients. Use of multiple threads allows the server to handle clients' requests in parallel, instead of artificially serializing them (or creating one server process per client, at great expense).
+
+===== Page 6 (번역) =====
+
+2 - An Introduction to Programming with Threads
+
+그것은 Digital의 Systems Research Center (SRC)에서 Topaz 시스템을 위해 우리가 선택한 스레드 기능 설계 방식입니다. '독특하다'는 것은 여기 제시된 기법들이 지난 10년간 제 개인적인 스레드 프로그래밍 경험에서 비롯되었기 때문입니다. 어떤 프로그래밍 기법이 "좋은"지 또는 "중요한"지에 대해 다른 의견을 가진 동료들을 대변하려는 시도는 하지 않았습니다. 그럼에도 불구하고, 여기 제시된 아이디어들을 이해하는 것이 동시적 스레드 프로그래밍을 위한 건전한 기초가 될 것이라고 믿습니다.
+
+이 논문 전체에 걸쳐 저는 Modula-2+ [12]로 작성된 예제를 사용합니다. 이 예제들은 Algol 및 Pascal 계열 언어에 익숙한 사람이라면 누구나 쉽게 이해할 수 있을 것입니다. 예제들은 동시성과 동기화에 대한 요점을 설명하기 위한 것이지, 실제 프로그램에서 이 알고리즘을 그대로 사용하려고 시도하지 마시기 바랍니다.
+
+스레드는 컴파일러가 명백히 순차적인 프로그램을 가져와 다중 프로세서를 활용하는 객체 코드를 생성하는, 자동 병렬 분해(automatic parallel decomposition)를 위한 도구가 아닙니다. 그것은 제가 여기서 논의하지 않을 완전히 다른 분야의 기술입니다.
+
+## 왜 동시성을 사용하는가? (WHY USE CONCURRENCY?)
+
+동시성을 사용할 필요가 없다면 삶은 더 단순할 것입니다. 그러나 동시성 사용을 촉진하는 다양한 힘이 존재합니다. 가장 최근의 힘은 멀티프로세서(multi-processor)의 출현입니다. 이러한 기계에서는 실제로 여러 개의 동시 실행 지점이 존재하며, 스레드는 프로그램이 사용 가능한 하드웨어를 활용할 수 있게 해주는 매력적인 도구입니다. 대부분의 기존 운영체제에서 대안은 프로그램을 별도의 주소 공간에서 실행되는 여러 개의 개별 프로세스로 구성하는 것입니다. 이는 설정 비용이 많이 드는 경향이 있으며, 공유 세그먼트가 있더라도 주소 공간 간 통신 비용은 종종 높습니다. 경량 멀티스레딩 기능을 사용함으로써 프로그래머는 프로세서를 저렴하게 활용할 수 있습니다. 이는 1000개가 아닌 약 10개 정도의 프로세서를 가진 시스템에서 잘 작동하는 것으로 보입니다.
+
+스레드가 유용한 두 번째 영역은 디스크, 네트워크, 터미널, 프린터와 같은 느린 장치들을 구동하는 것입니다. 이러한 경우 효율적인 프로그램은 장치가 다음 이벤트(예: 디스크 전송 완료 또는 네트워크로부터 패킷 수신)를 생성할 때까지 기다리는 동안 다른 유용한 작업을 수행해야 합니다. 나중에 살펴보겠지만, 이는 장치 요청이 모두 순차적이라고 가정하는 태도(즉, 요청이 완료될 때까지 호출한 스레드의 실행을 일시 중단함)를 취하고, 그동안 프로그램은 다른 스레드에서 다른 작업을 수행함으로써 스레드를 사용하여 아주 쉽게 프로그래밍할 수 있습니다.
+
+세 번째 동시성의 원천은 인간 사용자입니다. 인간은 실제로 두세 가지 일을 동시에 하는 데 꽤 능숙하며, 자신의 컴퓨터가 그만큼 못할 경우 불쾌감을 느끼는 것 같습니다. 이것 역시 스레드가 편리한 프로그래밍 방법을 제공합니다. 현대적인 윈도우 시스템의 일반적인 구조는 사용자가 (예를 들어 마우스로 버튼을 클릭하여) 동작을 호출할 때마다 별도의 스레드를 사용하여 그 동작을 구현하는 것입니다. 사용자가 여러 동작을 호출하면 여러 스레드가 병렬로 실행됩니다. (참고로 윈도우 시스템의 구현은 아마 마우스 동작 자체를 감시하는 스레드도 사용할 것입니다. 마우스는 느린 장치의 예이기 때문입니다.)
+
+네 번째 동시성의 원천은 분산 시스템을 구축할 때 나타납니다. 여기서 우리는 여러 클라이언트의 요청을 기꺼이 처리하는 공유 네트워크 서버(예: 파일 서버 또는 스풀링 인쇄 서버)를 자주 만납니다. 여러 스레드를 사용하면 서버가 클라이언트 요청을 인위적으로 직렬화하거나(또는 큰 비용을 들여 클라이언트당 하나의 서버 프로세스를 생성하는 대신) 병렬로 처리할 수 있습니다.
+
+================================================================================
+
+===== Page 7 (원문) =====
+
+3
+
+Sometimes you can deliberately add concurrency to your program in order to reduce the latency of operations (the elapsed time between calling a procedure and the procedure returning). Often, some of the work incurred by a procedure can be deferred, since it does not affect the result of the procedure. For example, when you add or remove something in a balanced tree you could happily return to the caller before re- balancing the tree. With threads you can achieve this easily: do the re- balancing in a separate thread. If the separate thread is scheduled at a lower priority, then the work can be done at a time when you are less busy (for example, when waiting for user input). Adding threads to defer work is a powerful technique, even on a uni- processor. Even if the same total work is done, reducing latency can improve the responsiveness of your program.
+
+## THE DESIGN OF A THREAD FACILITY
+
+We can't discuss how to program with threads until we agree on the primitives provided by a multi- threading facility. The various systems that support threads offer quite similar facilities, but there is a lot of diversity in the details. In general, there are four major mechanisms: thread creation, mutual exclusion, waiting for events, and some arrangement for getting a thread out of an unwanted long- term wait. The discussions in the rest of the paper are organized around the particular primitives provided by the SRC thread facility [4], and I describe here their detailed semantics. In the appendix I describe the corresponding parts of the thread facilities provided by some other systems, and how they relate to the SRC facilities.
+
+===== Page 7 (번역) =====
+
+3
+
+때로는 작업의 지연 시간(latency) (프로시저를 호출하고 반환될 때까지 경과된 시간)을 줄이기 위해 의도적으로 프로그램에 동시성을 추가할 수 있습니다. 종종 프로시저가 수행하는 작업 중 일부는 결과에 영향을 미치지 않으므로 지연시킬 수 있습니다. 예를 들어, 균형 트리(balanced tree)에 무언가를 추가하거나 제거할 때, 트리의 재균형을 맞추기 전에 호출자에게 반환할 수 있습니다. 스레드를 사용하면 이를 쉽게 달성할 수 있습니다: 재균형 작업을 별도의 스레드에서 수행하면 됩니다. 별도 스레드의 우선순위를 낮게 설정하면, 작업은 덜 바쁜 시간(예: 사용자 입력을 기다릴 때)에 수행될 수 있습니다. 작업을 지연시키기 위해 스레드를 추가하는 것은 단일 프로세서(uni-processor)에서도 강력한 기법입니다. 동일한 총 작업량이 수행되더라도 지연 시간을 줄이면 프로그램의 응답성을 향상시킬 수 있습니다.
+
+## 스레드 기능의 설계 (THE DESIGN OF A THREAD FACILITY)
+
+멀티스레딩 기능이 제공하는 기본 연산(primitive)들에 대해 동의하지 않고서는 스레드 프로그래밍 방법을 논의할 수 없습니다. 스레드를 지원하는 다양한 시스템들은 상당히 유사한 기능들을 제공하지만, 세부 사항에는 많은 차이가 있습니다. 일반적으로 네 가지 주요 메커니즘이 있습니다: 스레드 생성, 상호 배제(mutual exclusion), 이벤트 대기, 그리고 원치 않는 장기 대기로부터 스레드를 빼내는 방법. 논문의 나머지 부분에서의 논의는 SRC 스레드 기능 [4]이 제공하는 특정 기본 연산들을 중심으로 구성되며, 여기서는 그 상세한 의미론을 설명합니다. 부록에서는 다른 일부 시스템에서 제공하는 스레드 기능의 해당 부분과 그것이 SRC 기능과 어떻게 관련되는지 설명합니다.
+
+================================================================================

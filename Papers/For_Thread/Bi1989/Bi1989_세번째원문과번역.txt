@@ -1,0 +1,333 @@
+================================================================================
+파일명: Chapter4_USING_A_MUTEX_번역.txt
+================================================================================
+
+===== Page 11 (원문) =====
+
+## USING A MUTEX: ACCESSING SHARED DATA
+
+The basic rule for using mutual exclusion is straightforward: in a multi- threaded program all shared mutable data must be protected by associating it with some mutex, and you must access the data only from a thread that is holding the associated mutex (i.e., from a thread executing within a LOCK clause that locked the mutex).
+
+## Unprotected data
+
+The simplest bug related to mutexes occurs when you fail to protect some mutable data and then you access it without the benefits of synchronization. For example, consider the following code fragment. The global variable "table" represents a table that can be filled with REFANY values by calling "Insert". The procedure works by inserting a non- NIL argument at index "i" of "table", then incrementing "i". The table is initially empty (all NIL).
+
+VAR table: ARRAY [0..999] OF REFANY;
+VAR i: [0..1000];
+PROCEDURE Insert(r: REFANY);
+BEGIN
+IF r # NIL THEN
+table[i] := r; (1)
+i := i+1; (2)
+END;
+END Insert;
+FOR i := 0 TO 999 DO table[i] := NIL END;
+i := 0;
+
+Now consider what might happen if thread A calls "Insert(x)" concurrently with thread B calling "Insert(y)". If the order of execution happens to be that thread A executes (1), then thread B executes (1), then thread A executes (2) then thread B executes (2), confusion will result. Instead of the intended effect (that "x" and "y" are inserted into "table", at separate indexes), the final state would be that "y" is correctly in the table, but "x" has been lost. Further, since (2) has been executed twice, an empty (NIL) slot has
+
+===== Page 11 (번역) =====
+
+## 뮤텍스 사용하기: 공유 데이터 접근 (USING A MUTEX: ACCESSING SHARED DATA)
+
+상호 배제 사용의 기본 규칙은 간단합니다. 멀티스레드 프로그램에서 모든 공유 가변 데이터(mutable data)는 어떤 뮤텍스와 연관시켜 보호해야 하며, 연관된 뮤텍스를 보유한 스레드(즉, 해당 뮤텍스를 잠근 LOCK 절 내에서 실행 중인 스레드)만 해당 데이터에 접근해야 합니다.
+
+## 보호되지 않은 데이터 (Unprotected data)
+
+뮤텍스와 관련된 가장 단순한 버그는 일부 가변 데이터를 보호하지 않은 채 동기화의 혜택 없이 접근할 때 발생합니다. 예를 들어, 다음 코드 조각을 생각해 보겠습니다. 전역 변수 "table"은 "Insert"를 호출하여 REFANY 값으로 채울 수 있는 테이블을 나타냅니다. 이 프로시저는 "table"의 인덱스 "i"에 NIL이 아닌 인자를 삽입한 다음 "i"를 증가시키는 방식으로 작동합니다. 테이블은 초기에 비어 있습니다 (모두 NIL).
+
+VAR table: ARRAY [0..999] OF REFANY;
+VAR i: [0..1000];
+PROCEDURE Insert(r: REFANY);
+BEGIN
+IF r # NIL THEN
+table[i] := r; (1)
+i := i+1; (2)
+END;
+END Insert;
+FOR i := 0 TO 999 DO table[i] := NIL END;
+i := 0;
+
+이제 스레드 A가 "Insert(x)"를 호출하고 동시에 스레드 B가 "Insert(y)"를 호출하면 어떤 일이 발생할 수 있는지 생각해 보겠습니다. 실행 순서가 스레드 A가 (1)을 실행하고, 이어서 스레드 B가 (1)을 실행하고, 그 다음 스레드 A가 (2)를 실행하고, 마지막으로 스레드 B가 (2)를 실행한다면, 혼란이 발생할 것입니다. 의도된 효과("x"와 "y"가 별도의 인덱스에 테이블에 삽입되는 것) 대신, 최종 상태는 "y"는 테이블에 올바르게 들어가지만 "x"는 손실됩니다. 게다가 (2)가 두 번 실행되었기 때문에 빈 (NIL) 슬롯이
+
+================================================================================
+
+===== Page 12 (원문) =====
+
+8 - An Introduction to Programming with Threads
+
+been left orphaned in the table. Such errors would be prevented by enclosing (1) and (2) in a LOCK clause, as follows.
+
+PROCEDURE Insert(r: REFANY);
+BEGIN
+IF r # NIL THEN
+LOCK m DO
+table[i] := r;
+i := i+1;
+END;
+END;
+END Insert;
+
+The LOCK clause enforces serialization of the threads' actions, so that one thread executes the statements inside the LOCK clause, then the other thread executes them.
+
+The effects of unsynchronized access to mutable data can be bizarre, since they will depend on the precise timing relationship between your threads. Also, in most environments the timing relationship is non- deterministic (because of real- time effects like page faults, or the use of real- time timer facilities, or because of actual asynchrony in a multi- processor system).
+
+It would be a good idea for your language system to give you some help here, for example by syntax that prevents you accessing variables until you have locked the appropriate mutex. But most languages don't offer this yet. Meanwhile, you need programmer discipline and careful use of searching and browsing tools. Such problems will arise less often if you use very simple, coarse grain, locking. For example, use a single mutex to protect all the global state of an entire module. Unfortunately, this can cause other problems, described below. So the best advice is to make your use of mutexes be as simple as possible, but no simpler. If you are tempted to use more elaborate arrangements, be entirely sure that the benefits are worth the risks, not just that the program looks nicer.
+
+## Invariants
+
+When the data protected by a mutex is at all complicated, many programmers find it convenient to think of the mutex as protecting the invariant of the associated data. An invariant is a boolean function of the data that is true whenever the mutex is not held. So any thread that locks the mutex knows that it starts out with the invariant true. Each thread has the responsibility to restore the invariant before releasing the mutex. This includes restoring the invariant before calling "Wait", since that unlocks the mutex.
+
+For example, in the code fragment above (for inserting an element into a table), the invariant is that "i" is the index of the first NIL element in "table", and all elements beyond index "i" are NIL. Note that the variables mentioned in the invariant are accessed only with this mutex held. Note also that the invariant is not true after the first assignment statement but before the second one—it is only guaranteed when the mutex is not being held.
+
+Frequently the invariants are simple enough that you barely think about them, but often your program will benefit from writing them down explicitly. And if they are too complicated to write down, you're probably doing something wrong. You might find it
+
+===== Page 12 (번역) =====
+
+8 - An Introduction to Programming with Threads
+
+테이블에 고아처럼 남게 됩니다. 이러한 오류는 다음과 같이 (1)과 (2)를 LOCK 절로 감싸면 방지할 수 있습니다.
+
+PROCEDURE Insert(r: REFANY);
+BEGIN
+IF r # NIL THEN
+LOCK m DO
+table[i] := r;
+i := i+1;
+END;
+END;
+END Insert;
+
+LOCK 절은 스레드 동작의 직렬화(serialization)를 강제하여, 한 스레드가 LOCK 절 내부의 문장들을 실행한 후에야 다른 스레드가 실행할 수 있도록 합니다.
+
+가변 데이터에 대한 동기화되지 않은 접근의 결과는 기이할 수 있는데, 이는 스레드 간의 정확한 타이밍 관계에 따라 달라지기 때문입니다. 또한 대부분의 환경에서 타이밍 관계는 비결정적(non-deterministic)입니다 (페이지 폴트와 같은 실시간 효과, 실시간 타이머 기능 사용, 또는 멀티프로세서 시스템의 실제 비동기성 때문입니다).
+
+여기서 언어 시스템이 약간의 도움을 주는 것이 좋을 것입니다. 예를 들어, 적절한 뮤텍스를 잠그기 전까지 변수에 접근하지 못하게 하는 문법 같은 것입니다. 그러나 대부분의 언어는 아직 이를 제공하지 않습니다. 그동안은 프로그래머의 훈련과 검색 및 탐색 도구의 주의 깊은 사용이 필요합니다. 이러한 문제는 매우 간단하고 굵은 입도(coarse grain)의 잠금을 사용하면 덜 자주 발생합니다. 예를 들어, 단일 뮤텍스를 사용하여 전체 모듈의 모든 전역 상태를 보호하는 것입니다. 불행히도 이는 아래에 설명된 다른 문제들을 일으킬 수 있습니다. 따라서 가장 좋은 조언은 뮤텍스 사용을 가능한 한 간단하게 하되, 너무 단순하지는 않게 하라는 것입니다. 더 정교한 구조를 사용하고 싶은 유형이 든다면, 프로그램이 단지 더 보기 좋다는 이유만이 아니라 그 이점이 위험을 감수할 만한 가치가 있는지 완전히 확신하십시오.
+
+## 불변 조건 (Invariants)
+
+뮤텍스로 보호되는 데이터가 복잡할 때, 많은 프로그래머들은 뮤텍스가 연관 데이터의 불변 조건(invariant)을 보호한다고 생각하는 것이 편리합니다. 불변 조건은 뮤텍스가 보유되고 있지 않을 때마다 참(true)인 데이터의 불리언 함수입니다. 따라서 뮤텍스를 잠그는 모든 스레드는 불변 조건이 참인 상태에서 시작한다는 것을 알고 있습니다. 각 스레드는 뮤텍스를 해제하기 전에 불변 조건을 복원할 책임이 있습니다. 여기에는 "Wait"을 호출하기 전에 불변 조건을 복원하는 것도 포함되는데, "Wait"이 뮤텍스를 잠금 해제하기 때문입니다.
+
+예를 들어, 위의 코드 조각(테이블에 요소를 삽입하는)에서 불변 조건은 "i"가 "table"에서 첫 번째 NIL 요소의 인덱스이고, 인덱스 "i" 이후의 모든 요소는 NIL이라는 것입니다. 불변 조건에서 언급된 변수들은 이 뮤텍스가 보유된 상태에서만 접근된다는 점에 유의하세요. 또한 불변 조건은 첫 번째 할당문 이후, 두 번째 할당문 이전에는 참이 아니라는 점에 유의하세요. 이는 뮤텍스가 보유되고 있지 않을 때만 보장됩니다.
+
+종종 불변 조건은 간단해서 거의 의식하지 못하지만, 명시적으로 작성하면 프로그램에 도움이 되는 경우가 많습니다. 그리고 불변 조건이 너무 복잡해서 작성할 수 없다면, 아마도 뭔가 잘못하고 있는 것입니다.
+
+================================================================================
+
+===== Page 13 (원문) =====
+
+best to write down your invariants informally, as in the previous paragraph, or you might prefer to use some formal specification language such as Larch [7], the language we used to specify the SRC threads facility [4]. It is also generally a good idea to make it clear (by writing it down in the program) which mutex protects which data items.
+
+## Cheating
+
+The rule that you must use a mutex to protect every access to global variables is based on a concurrency model where the actions of the threads are arbitrarily interleaved. If the data being protected by a mutex is particularly simple (for example just one integer, or even just one boolean), programmers are often tempted to skip using the mutex, since it introduces significant overhead and they "know" that the variables will be accessed with atomic instructions and that instructions are not interleaved. Before you succumb to this temptation, you must carefully consider the hardware where your program will run. If your single integer variable is word aligned, and if you are running on a uni- processor, and if your compiler generates the obvious instruction sequences and doesn't slave variables into registers, then you will probably get the correct answer. In other circumstances you might not get the correct answer; or worse, you might usually get the correct answer but very occasionally get the wrong answer. For machine independent correct code, you absolutely must use a synchronization technique approved by your programming language.4
+
+One cheating technique I have found helpful is to use unsynchronized access as a hint. In this context by "hint" I mean a cheap way of getting information that is either correct or causes you to invoke a more expensive, correct, way of getting the information. For example, if you want to call an initialization procedure exactly once you might use code like the following.
+
+IF NOT initDone THEN
+LOCK m DO
+IF NOT initDone THEN
+Initialize();
+initDone := TRUE;
+END;
+END;
+END;
+
+This code is correct if you can assume that "initDone" is initialized to FALSE, that reading it without a mutex will not cause a runtime error, and that reading it without a mutex when its value is FALSE will give you the value FALSE. It doesn't matter if you occasionally might get FALSE instead of TRUE, since that will just cause you to lock the mutex and get the correct value. But I repeat: you should only do this after verifying that your programming language guarantees the validity of these assumptions.
+
+===== Page 13 (번역) =====
+
+이전 단락에서처럼 비공식적으로 불변 조건을 작성하거나, SRC 스레드 기능 명세에 사용했던 Larch [7]와 같은 형식 명세 언어를 사용하는 것이 좋을 수 있습니다. 또한 어떤 뮤텍스가 어떤 데이터 항목을 보호하는지 (프로그램 내에 기록하여) 명확히 하는 것이 일반적으로 좋은 생각입니다.
+
+## 편법 (Cheating)
+
+모든 전역 변수 접근을 보호하기 위해 뮤텍스를 사용해야 한다는 규칙은 스레드 동작이 임의로 인터리빙(interleaved)되는 동시성 모델에 기반합니다. 뮤텍스로 보호되는 데이터가 특히 단순한 경우(예: 단일 정수 하나, 또는 단일 불리언 하나), 프로그래머들은 뮤텍스 사용을 생략하고 싶은 유혹을 자주 받습니다. 뮤텍스는 상당한 오버헤드를 초래하고, 프로그래머들은 변수가 원자적 명령어로 접근될 것이며 명령어들이 인터리빙되지 않을 것이라고 "알고" 있기 때문입니다. 이 유혹에 빠지기 전에, 프로그램이 실행될 하드웨어를 신중하게 고려해야 합니다. 단일 정수 변수가 워드 정렬되어 있고, 단일 프로세서(uni-processor)에서 실행 중이며, 컴파일러가 명백한 명령어 시퀀스를 생성하고 변수를 레지스터에 종속시키지 않는다면, 아마 올바른 결과를 얻을 것입니다. 다른 환경에서는 올바른 결과를 얻지 못할 수도 있습니다. 더 나쁜 경우, 대개는 올바른 결과를 얻지만 아주 드물게 잘못된 결과를 얻을 수도 있습니다. 기계 독립적인 올바른 코드를 위해서는 반드시 프로그래밍 언어가 승인한 동기화 기법을 사용해야 합니다.4
+
+제가 유용하다고 생각한 한 가지 편법은 동기화되지 않은 접근을 힌트(hint)로 사용하는 것입니다. 여기서 "힌트"란 정보를 얻는 저렴한 방법으로, 그 정보가 정확하거나, 아니면 더 비용이 많이 들지만 정확한 정보를 얻는 방법을 호출하도록 유도하는 것을 의미합니다. 예를 들어, 초기화 프로시저를 정확히 한 번만 호출하려 한다면 다음과 같은 코드를 사용할 수 있습니다.
+
+IF NOT initDone THEN
+LOCK m DO
+IF NOT initDone THEN
+Initialize();
+initDone := TRUE;
+END;
+END;
+END;
+
+이 코드는 "initDone"이 FALSE로 초기화되고, 뮤텍스 없이 이를 읽어도 런타임 오류가 발생하지 않으며, 값이 FALSE일 때 뮤텍스 없이 읽으면 FALSE 값을 얻는다고 가정할 수 있다면 정확합니다. 때때로 TRUE 대신 FALSE를 얻더라도, 이는 단지 뮤텍스를 잠그고 올바른 값을 얻도록 만들 뿐이므로 문제되지 않습니다. 하지만 다시 말씀드립니다: 프로그래밍 언어가 이러한 가정들의 유효성을 보장한다는 것을 확인한 후에만 이렇게 해야 합니다.
+
+================================================================================
+
+===== Page 14 (원문) =====
+
+10 - An Introduction to Programming with Threads
+
+## Deadlocks involving only mutexes
+
+The simplest cases of deadlock occur when a thread tries to lock a mutex that it already holds (although some systems explicitly allow a thread to continue unhindered if it does this). There are numerous more elaborate cases of deadlock involving mutexes, for example:
+
+Thread A locks mutex M1;
+thread B locks mutex M2;
+thread A blocks trying to lock M2;
+thread B blocks trying to lock M1.
+
+The most effective rule for avoiding such deadlocks is to apply a partial order to the acquisition of mutexes in your program. In other words, arrange that for any pair of mutexes { M1, M2 }, each thread that needs to hold M1 and M2 simultaneously locks M1 and M2 in the same order (for example, M1 is always locked before M2). This rule completely avoids deadlocks involving only mutexes (though as we will see later, there are other potential deadlocks when your program uses condition variables).
+
+There is a technique that sometimes makes it easier to achieve this partial order. In the example above, thread A probably wasn't trying to modify exactly the same set of data as thread B. Frequently, if you examine the algorithm carefully you can partition the data into smaller pieces protected by separate mutexes. For example, when thread B wanted to lock M1, it might actually be wanting access to data disjoint from the data that thread A was accessing under M1. In such a case you might protect this disjoint data with a separate mutex, M3, and avoid the deadlock. Note that this is just a technique to enable you to have a partial order on the mutexes (M1 before M2 before M3, in this example). But remember that the more you pursue this hint, the more complicated your locking becomes, and the more likely you are to have some unsynchronized access to shared data. Having your program deadlock is almost always a preferable risk to having your program give the wrong answer.
+
+## Poor performance through lock conflicts
+
+Assuming that you have arranged your program to have enough mutexes that all the data is protected, and a fine enough granularity that it does not deadlock, the remaining mutex problems to worry about are all performance problems.
+
+Whenever a thread is holding a mutex, it is potentially stopping another thread from making progress—if the other thread blocks on the mutex. If the first thread can use all the machine's resources, that is probably fine. But if the first thread, while holding the mutex, ceases to make progress (for example by blocking on another mutex, or by taking a page fault, or by waiting for an i/o device), then the total throughput of your program is degraded. The problem is worse on a multi- processor, where no single thread can utilize the entire machine; here if you cause another thread to block, it might mean that a processor goes idle. In general, to get good performance you must arrange that lock conflicts are rare events. The best way to reduce lock conflicts is to lock at a finer granularity; but this introduces complexity. There is no way out of this dilemma—it is a trade- off inherent in concurrent computation.
+
+===== Page 14 (번역) =====
+
+10 - An Introduction to Programming with Threads
+
+## 뮤텍스만 관련된 교착 상태 (Deadlocks involving only mutexes)
+
+교착 상태(deadlock)의 가장 단순한 경우는 스레드가 이미 보유하고 있는 뮤텍스를 다시 잠그려고 할 때 발생합니다(일부 시스템에서는 이 경우 스레드가 방해 없이 계속 진행되도록 명시적으로 허용하기도 합니다). 뮤텍스와 관련된 더 정교한 교착 상태 사례도 많이 있습니다. 예를 들어:
+
+스레드 A가 뮤텍스 M1을 잠금;
+스레드 B가 뮤텍스 M2를 잠금;
+스레드 A가 M2를 잠그려고 시도하다 블록됨;
+스레드 B가 M1을 잠그려고 시도하다 블록됨.
+
+이러한 교착 상태를 피하는 가장 효과적인 규칙은 프로그램에서 뮤텍스 획득에 부분 순서(partial order)를 적용하는 것입니다. 즉, 임의의 뮤텍스 쌍 {M1, M2}에 대해, M1과 M2를 동시에 보유해야 하는 모든 스레드는 동일한 순서로 M1과 M2를 잠그도록 구성하는 것입니다 (예: M1이 항상 M2보다 먼저 잠기도록). 이 규칙은 뮤텍스만 관련된 교착 상태를 완전히 피할 수 있습니다 (하지만 나중에 보겠지만, 프로그램이 조건 변수를 사용할 때는 다른 잠재적 교착 상태가 있습니다).
+
+이 부분 순서를 더 쉽게 달성할 수 있게 하는 기법이 있습니다. 위의 예에서 스레드 A는 아마 스레드 B와 정확히 동일한 데이터 집합을 수정하려는 것은 아니었을 것입니다. 종종 알고리즘을 주의 깊게 살펴보면 데이터를 별도의 뮤텍스로 보호되는 더 작은 조각으로 분할할 수 있습니다. 예를 들어, 스레드 B가 M1을 잠그고자 했을 때, 실제로는 스레드 A가 M1 하에서 접근 중인 데이터와 분리된(disjoint) 데이터에 접근하려는 것일 수 있습니다. 이런 경우 이 분리된 데이터를 별도의 뮤텍스 M3로 보호하여 교착 상태를 피할 수 있습니다. 이는 단지 뮤텍스에 대한 부분 순서(이 예에서는 M1 before M2 before M3)를 가질 수 있게 하는 기법일 뿐입니다. 그러나 이 힌트를 추구하면 할수록 잠금이 더 복잡해지고, 공유 데이터에 대한 동기화되지 않은 접근이 발생할 가능성이 높아진다는 점을 기억하세요. 프로그램이 교착 상태에 빠지는 것은 프로그램이 잘못된 답을 내는 것보다 거의 항상 더 나은 위험입니다.
+
+## 잠금 충돌로 인한 성능 저하 (Poor performance through lock conflicts)
+
+모든 데이터가 보호될 만큼 충분한 뮤텍스를 갖추고, 교착 상태가 발생하지 않을 만큼 충분히 세밀한 입도(granularity)를 갖도록 프로그램을 구성했다고 가정하면, 남은 뮤텍스 문제는 모두 성능 문제입니다.
+
+스레드가 뮤텍스를 보유하고 있는 동안, 잠재적으로 다른 스레드의 진행을 막을 수 있습니다 (다른 스레드가 해당 뮤텍스에서 블록되는 경우). 첫 번째 스레드가 기계의 모든 자원을 사용할 수 있다면 괜찮을 것입니다. 그러나 첫 번째 스레드가 뮤텍스를 보유한 상태에서 진행을 멈춘다면(예: 다른 뮤텍스에서 블록되거나, 페이지 폴트가 발생하거나, I/O 장치를 기다리는 경우), 프로그램의 전체 처리량은 저하됩니다. 이 문제는 단일 스레드로는 전체 기계를 활용할 수 없는 멀티프로세서에서 더 심각합니다. 여기서 다른 스레드를 블록시키면 프로세서가 유휴 상태(idle)가 될 수 있습니다. 일반적으로 좋은 성능을 얻으려면 잠금 충돌(lock conflicts)이 드문 사건이 되도록 구성해야 합니다. 잠금 충돌을 줄이는 가장 좋은 방법은 더 세밀한 입도(finer granularity)로 잠그는 것입니다. 그러나 이는 복잡성을 초래합니다. 이 딜레마에서 벗어날 방법은 없습니다. 이는 동시 계산에 내재된 절충(trade-off)입니다.
+
+================================================================================
+
+===== Page 15 (원문) =====
+
+The most typical example where locking granularity is important is in a module that manages a set of objects, for example a set of open buffered files. The simplest strategy is to use a single mutex for all the operations: open, close, read, write, and so forth. But this would prevent multiple writes on separate files proceeding in parallel, for no good reason. So a better strategy is to use one lock for operations on the global list of open files, and one lock per open file for operations affecting only that file. This can be achieved by associating a mutex with the record representing each open file. The code might look something like the following.
+
+TYPE File = REF RECORD
+m: Thread.Mutex;
+...
+END;
+VAR globalLock: Thread.Mutex;
+VAR globalTable: ...;
+
+PROCEDURE Open(name: String): File;
+BEGIN
+LOCK globalLock DO
+... (* access globalTable *)
+END;
+END Open;
+
+PROCEDURE Write(f: File, ....);
+BEGIN
+LOCK f^.m DO
+... (* access fields of f *)
+END;
+END Write;
+
+In even more complicated situations, you might protect different parts of a record with different mutexes. You might also have some immutable fields in the record that need no protection at all. In these situations, though, you must be careful about how the record is laid out in memory. If your language allows you to pack fields into records sufficiently tightly that they cannot be accessed by atomic operations on your computer's memory, and if you protect such packed fields with different mutexes, you might get the wrong answer. This is because the generated instructions for modifying such fields involve reading them, modifying them in a register (or on- stack), then writing them back. If two threads are doing this concurrently for two fields that occupy the same memory word, you might get the wrong result. You need to be especially conscious of this potential bug if you over- ride the language's default algorithm for laying out fields of records. Ideally, your programming language will prevent this bug, but it probably won't.
+
+There is an interaction between mutexes and the thread scheduler that can produce particularly insidious performance problems. The scheduler is the part of the thread implementation (often part of the operating system) that decides which of the non- blocked threads should actually be given a processor to run on. Generally the scheduler makes its decision based on a priority associated with each thread. (Depending on the details of your system the priority might be fixed or dynamic, programmer assigned or computed by the scheduler. Often the algorithm for deciding who to run is not specified at all.) Lock conflicts can lead to a situation where some high priority thread never makes progress at
+
+===== Page 15 (번역) =====
+
+잠금 입도(granularity)가 중요한 가장 전형적인 예는 객체 집합(예: 열린 버퍼 파일 집합)을 관리하는 모듈입니다. 가장 간단한 전략은 열기(open), 닫기(close), 읽기(read), 쓰기(write) 등 모든 연산에 대해 단일 뮤텍스를 사용하는 것입니다. 그러나 이는 정당한 이유 없이 별도 파일에 대한 여러 쓰기 작업이 병렬로 진행되는 것을 막습니다. 따라서 더 나은 전략은 열린 파일의 전역 목록에 대한 연산에는 하나의 잠금을 사용하고, 각 열린 파일에 대해서는 해당 파일에만 영향을 미치는 연산을 위한 잠금을 하나씩 사용하는 것입니다. 이는 각 열린 파일을 나타내는 레코드에 뮤텍스를 연관시킴으로써 달성할 수 있습니다. 코드는 다음과 같이 보일 수 있습니다.
+
+TYPE File = REF RECORD
+m: Thread.Mutex;
+...
+END;
+VAR globalLock: Thread.Mutex;
+VAR globalTable: ...;
+
+PROCEDURE Open(name: String): File;
+BEGIN
+LOCK globalLock DO
+... (* globalTable 접근 *)
+END;
+END Open;
+
+PROCEDURE Write(f: File, ....);
+BEGIN
+LOCK f^.m DO
+... (* f의 필드 접근 *)
+END;
+END Write;
+
+더 복잡한 상황에서는 레코드의 다른 부분들을 다른 뮤텍스로 보호할 수 있습니다. 또한 전혀 보호가 필요 없는 불변(immutable) 필드가 레코드에 있을 수도 있습니다. 그러나 이러한 상황에서는 메모리에서 레코드가 어떻게 배치되는지 주의해야 합니다. 언어가 필드를 레코드에 매우 빽빽하게(pack) 허용하여 컴퓨터 메모리의 원자적 연산으로 접근할 수 없게 하고, 그러한 빽빽하게 채워진 필드들을 다른 뮤텍스로 보호한다면, 잘못된 결과를 얻을 수 있습니다. 이는 이러한 필드들을 수정하기 위해 생성된 명령어들이 필드를 읽고, 레지스터(또는 스택)에서 수정한 후, 다시 쓰는 과정을 포함하기 때문입니다. 두 스레드가 동일한 메모리 워드를 점유하는 두 필드에 대해 이것을 동시에 수행한다면 잘못된 결과를 얻을 수 있습니다. 레코드 필드 배치를 위한 언어의 기본 알고리즘을 재정의(override)하는 경우 이 잠재적 버그에 특히 주의해야 합니다. 이상적으로는 프로그래밍 언어가 이 버그를 방지하겠지만, 아마 그렇지 않을 것입니다.
+
+뮤텍스와 스레드 스케줄러 간의 상호작용은 특히 교묘한 성능 문제를 일으킬 수 있습니다. 스케줄러는 블록되지 않은 스레드들 중 실제로 프로세서를 할당받아 실행될 스레드를 결정하는 스레드 구현(종종 운영체제의 일부)의 일부입니다. 일반적으로 스케줄러는 각 스레드에 연관된 우선순위(priority)에 기반하여 결정을 내립니다. (시스템의 세부 사항에 따라 우선순위는 고정적이거나 동적일 수 있고, 프로그래머가 할당하거나 스케줄러가 계산할 수 있습니다. 누구를 실행할지 결정하는 알고리즘은 종종 전혀 명시되지 않습니다.) 잠금 충돌은 일부 높은 우선순위 스레드가 전혀 진행하지 못하는 상황을 초래할 수 있습니다.
+
+================================================================================
+
+===== Page 16 (원문) =====
+
+11. An Introduction to Programming with Threads
+
+all, despite the fact that its high priority indicates that it is more urgent than the threads actually running.
+
+This can happen, for example, in the following scenario on a uni- processor. Thread A is high priority, thread B is medium priority and thread C is low priority. The sequence of events is:
+
+C is running (e.g. because A and B are blocked somewhere);
+C locks mutex M;
+B wakes up and pre- empts C (i.e. B runs instead of C since B has higher priority);
+B embarks on some very long computation;
+A wakes up and pre- empts B (since A has higher priority);
+A tries to lock M;
+A blocks, and so the processor is given back to B;
+B continues its very long computation.
+
+The net effect is that a high priority thread (A) is unable to make progress even though the processor is being used by a medium priority thread (B). This state is stable until there is processor time available for the low priority thread C to complete its work and unlock M.
+
+The programmer can avoid this problem by arranging for C to raise its priority before locking M. But this can be quite inconvenient, since it involves considering for each mutex which other thread priorities might be involved. The real solution of this problem lies with the implementer of your threads facility. He must somehow communicate to the scheduler that since A is blocked on M, the thread holding M should be viewed as having at least as high a priority as A. Unfortunately, your implementer has probably failed to do this—we don't do it in the SRC implementation.
+
+## Releasing the mutex within a LOCK clause
+
+There are times when you want to unlock the mutex in some region of program nested inside a LOCK clause. For example, you might want to unlock the mutex before calling down to a lower level abstraction that will block or execute for a long time (in order to avoid provoking delays for other threads that want to lock the mutex). The SRC system provides for this usage by offering the raw operations "Acquire(m)" and "Release(m)" in a lower- level, less- advertised, interface. You must exercise extra care if you take advantage of this. First, you must be sure that the operations are correctly bracketed, even in the presence of exceptions. Second, you must be prepared for the fact that the state of the monitor's data might have changed while you had the mutex unlocked. This can be tricky if you called "Release" explicitly (instead of just ending the LOCK clause) because you were imbedded in some flow control construct such as a conditional clause. Your program counter might now depend on the previous state of the monitor's data, implicitly making a decision that might no longer be valid. So SRC discourages this paradigm, to reduce the tendency to introduce quite subtle bugs.
+
+One other use of separate calls of "Acquire(m)" and "Release(m)" sometimes arises in the vicinity of forking. You might be executing with a mutex held and want to fork a new thread to continue working on the protected data, while the original thread continues without further access to the data. In other words, you would like to transfer the holding
+
+===== Page 16 (번역) =====
+
+11. An Introduction to Programming with Threads
+
+높은 우선순위가 실제 실행 중인 스레드들보다 더 긴급함을 나타냄에도 불구하고 말이죠.
+
+예를 들어, 단일 프로세서(uni-processor)에서 다음 시나리오와 같이 발생할 수 있습니다. 스레드 A는 높은 우선순위, 스레드 B는 중간 우선순위, 스레드 C는 낮은 우선순위입니다. 사건의 순서는 다음과 같습니다:
+
+C가 실행 중입니다 (예: A와 B가 어딘가에서 블록되어 있기 때문에);
+C가 뮤텍스 M을 잠급니다;
+B가 깨어나서 C를 선점합니다(pre-empt) (즉, B가 더 높은 우선순위이므로 C 대신 B가 실행됨);
+B가 매우 긴 계산을 시작합니다;
+A가 깨어나서 B를 선점합니다 (A가 더 높은 우선순위이므로);
+A가 M을 잠그려고 시도합니다;
+A가 블록되고, 그래서 프로세서는 B에게 돌아갑니다;
+B는 매우 긴 계산을 계속합니다.
+
+최종 효과는 높은 우선순위 스레드(A)가 프로세서가 중간 우선순위 스레드(B)에 의해 사용되고 있음에도 불구하고 진행할 수 없다는 것입니다. 이 상태는 낮은 우선순위 스레드 C가 작업을 완료하고 M의 잠금을 해제할 프로세서 시간이 생길 때까지 안정적으로 유지됩니다.
+
+프로그래머는 C가 M을 잠그기 전에 우선순위를 높이도록 구성함으로써 이 문제를 피할 수 있습니다. 그러나 이는 각 뮤텍스에 대해 어떤 다른 스레드 우선순위가 관련될 수 있는지 고려해야 하므로 상당히 불편할 수 있습니다. 이 문제의 진정한 해결책은 스레드 기능 구현자에게 있습니다. 구현자는 A가 M에서 블록되었으므로 M을 보유한 스레드는 적어도 A만큼 높은 우선순위를 가진 것으로 간주되어야 한다는 사실을 스케줄러에게 전달해야 합니다. 불행히도, 구현자는 아마 이를 제대로 해내지 못했을 것입니다. SRC 구현에서도 그렇게 하지 않습니다.
+
+## LOCK 절 내에서 뮤텍스 해제하기 (Releasing the mutex within a LOCK clause)
+
+LOCK 절 내에 중첩된 프로그램 영역에서 뮤텍스를 잠금 해제(unlock)하고 싶을 때가 있습니다. 예를 들어, (뮤텍스를 잠그고 싶어 하는 다른 스레드들의 지연을 유발하지 않기 위해) 블록되거나 오래 실행될 하위 수준 추상화를 호출하기 전에 뮤텍스를 잠금 해제하고 싶을 수 있습니다. SRC 시스템은 더 낮은 수준의, 덜 알려진 인터페이스에서 "Acquire(m)" 및 "Release(m)"이라는 원시 연산을 제공함으로써 이 사용법을 지원합니다. 이것을 활용하려면 특히 주의해야 합니다. 첫째, 예외가 발생하는 경우에도 연산들이 올바르게 짝을 이루어(bracketed) 사용되는지 확인해야 합니다. 둘째, 뮤텍스를 잠금 해제한 동안 모니터 데이터의 상태가 변경되었을 수 있다는 사실에 대비해야 합니다. 조건절과 같은 흐름 제어 구조 안에 내장되어 있어서 LOCK 절을 그냥 끝내는 대신 명시적으로 "Release"를 호출한 경우, 이는 까다로울 수 있습니다. 프로그램 카운터가 이제 모니터 데이터의 이전 상태에 의존하게 되어, 더 이상 유효하지 않을 수 있는 결정을 암시적으로 내릴 수 있습니다. 따라서 SRC는 아주 교묘한 버그를 유발하는 경향을 줄이기 위해 이 패러다임을 권장하지 않습니다.
+
+"Aquire(m)"과 "Release(m)"을 별도로 호출하는 또 다른 용도는 포크(fork) 주변에서 때때로 발생합니다. 뮤텍스를 보유한 상태로 실행 중이며, 원래 스레드는 데이터에 더 이상 접근하지 않고 계속 진행하는 동안, 보호된 데이터에 대한 작업을 계속하기 위해 새 스레드를 포크하고 싶을 수 있습니다. 즉, 뮤텍스 보유(holding)를
+
+================================================================================
+
+===== Page 17 (원문) =====
+
+of the mutex to the newly forked thread, atomically. You can achieve this by locking the mutex with "Acquire(m)" instead of LOCK, and later calling "Release(m)" in the forked thread. This tactic is quite dangerous—it is difficult to verify the correct functioning of the mutex. Additionally, many thread facilities keep track of which thread is holding a mutex—in those systems this tactic probably will not work. I recommend that you don't do this.
+
+===== Page 17 (번역) =====
+
+새로 포크된 스레드에 원자적으로(atomically) 이전하고 싶은 것입니다. 이는 LOCK 대신 "Acquire(m)"으로 뮤텍스를 잠그고, 나중에 포크된 스레드에서 "Release(m)"을 호출함으로써 달성할 수 있습니다. 이 전술은 상당히 위험합니다. 뮤텍스의 올바른 기능을 검증하기 어렵기 때문입니다. 게다가 많은 스레드 기능들은 어떤 스레드가 뮤텍스를 보유하고 있는지 추적합니다. 그러한 시스템에서는 이 전술이 아마 작동하지 않을 것입니다. 저는 이렇게 하지 않는 것을 권장합니다.
+
+================================================================================

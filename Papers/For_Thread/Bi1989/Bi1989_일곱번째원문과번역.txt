@@ -1,0 +1,93 @@
+================================================================================
+파일명: Chapter8_ADDITIONAL_TECHNIQUES_번역.txt
+================================================================================
+
+===== Page 30 (원문) =====
+
+## ADDITIONAL TECHNIQUES
+
+Most of the programming paradigms for using threads are quite simple. I've described several of them earlier; you will discover many others as you gain experience. A few of the useful techniques are much less obvious. This section describes some of these less obvious ones.
+
+## Up-calls
+
+Most of the time most programmers build their programs using layered abstractions. Higher level abstractions call only lower level ones, and abstractions at the same level do not call each other. All actions are initiated at the top level.
+
+This methodology carries over quite well to a world with concurrency. You can arrange that each thread will honor the abstraction boundaries. Permanent daemon threads within an abstraction initiate calls to lower levels, but not to higher levels. The abstraction layering has the added benefit that it forms a partial order, and this order is sufficient to prevent deadlocks when locking mutexes, without any additional care from the programmer.
+
+This purely top- down layering is not satisfactory when actions that affect high- level abstractions can be initiated at a low layer in your system. One frequently encountered example of this is on the receiving side of network communications. Other examples are user input, and spontaneous state changes in peripheral devices such as disks and tapes.
+
+Consider the example of a communications package dealing with incoming packets from a network. Here there are typically three or more layers of dispatch (corresponding to the data link, network and transport layers in OSI terminology). If you try to maintain a top- down calling hierarchy, you will find that you incur a context switch in each of these layers. The thread that wishes to receive data from its transport layer connection cannot be the thread that dispatches an incoming ethernet packet, since the ethernet packet might belong to a different connection, or a different protocol (for example, UDP instead of TCP), or a different protocol family altogether (for example, DECnet instead of IP). Many implementers have tried to maintain this layering for packet reception, and the effect has been uniformly bad performance—dominated by the cost of context switches.
+
+The alternative technique is known as "up- calls" [5]. In this methodology, you maintain a pool of threads willing to receive incoming data link layer (e.g. ethernet)
+
+===== Page 30 (번역) =====
+
+## 추가 기법들 (ADDITIONAL TECHNIQUES)
+
+스레드 사용을 위한 대부분의 프로그래밍 패러다임은 매우 간단합니다. 앞서 여러 가지를 설명했습니다. 경험을 쌓으면서 다른 많은 기법들을 발견하게 될 것입니다. 유용한 기법 중 몇 가지는 훨씬 덜 명확합니다. 이 섹션에서는 그중 덜 명확한 몇 가지를 설명합니다.
+
+## 업콜 (Up-calls)
+
+대부분의 프로그래머는 대부분의 시간을 계층적 추상화(layered abstractions)를 사용하여 프로그램을 구축하는 데 보냅니다. 상위 수준 추상화는 하위 수준 추상화만 호출하며, 동일한 수준의 추상화들은 서로 호출하지 않습니다. 모든 동작은 최상위 수준에서 시작됩니다.
+
+이 방법론은 동시성이 있는 세계에도 아주 잘 적용됩니다. 각 스레드가 추상화 경계를 존중하도록 구성할 수 있습니다. 추상화 내의 영구 데몬 스레드(permanent daemon thread)는 하위 수준에 대한 호출을 시작하지만, 상위 수준으로는 호출하지 않습니다. 추상화 계층화는 부분 순서(partial order)를 형성한다는 추가적인 이점이 있으며, 이 순서는 프로그래머의 추가적인 주의 없이도 뮤텍스를 잠글 때 교착 상태를 방지하기에 충분합니다.
+
+이러한 순수한 하향식(top-down) 계층화는 상위 수준 추상화에 영향을 미치는 동작이 시스템의 하위 계층에서 시작될 수 있는 경우 만족스럽지 않습니다. 이의 자주 접하는 예 중 하나는 네트워크 통신의 수신 측입니다. 다른 예로는 사용자 입력, 디스크 및 테이프와 같은 주변 장치의 자발적 상태 변경이 있습니다.
+
+네트워크로부터 들어오는 패킷을 처리하는 통신 패키지의 예를 생각해 보겠습니다. 여기에는 일반적으로 세 개 이상의 디스패치(dispatch) 계층이 있습니다(OSI 용어로 데이터 링크, 네트워크, 전송 계층에 해당). 하향식 호출 계층 구조를 유지하려고 하면, 각 계층에서 컨텍스트 스위치(context switch) 비용이 발생한다는 것을 알게 될 것입니다. 전송 계층 연결로부터 데이터를 수신하려는 스레드는 들어오는 이더넷 패킷을 디스패치하는 스레드가 될 수 없습니다. 이더넷 패킷이 다른 연결, 다른 프로토콜(예: TCP 대신 UDP), 또는 완전히 다른 프로토콜 패밀리(예: IP 대신 DECnet)에 속할 수 있기 때문입니다. 많은 구현자들이 패킷 수신을 위해 이 계층화를 유지하려고 시도했으며, 그 결과는 컨텍스트 스위치 비용에 의해 지배되는 균일하게 나쁜 성능이었습니다.
+
+대안 기법은 "업콜(up-call)" [5]로 알려져 있습니다. 이 방법론에서는 들어오는 데이터 링크 계층(예: 이더넷)
+
+================================================================================
+
+===== Page 31 (원문) =====
+
+packets. The receiving thread dispatches on ethernet protocol type and calls up to the network layer (e.g. DECnet or IP), where it dispatches again and calls up to the transport layer (e.g. TCP), where there is a final dispatch to the appropriate connection. In some systems, this up- call paradigm extends into the application. The attraction here is high performance: there are no unnecessary context switches. All the top- performing network implementations are structured this way.
+
+You do pay for this performance. As usual, the programmer's task has been made more complicated. Partly this is because each layer now has an up- call interface as well as the traditional down- call interface. But also the synchronization problem has become more delicate. In a purely top- down system it is fine to hold one layer's mutex while calling a lower layer (unless the lower layer might block on a condition variable and cause the sort of nested monitor deadlock we discussed earlier). But in the presence of up- calls this can easily provoke a deadlock involving just the mutexes—if an up- calling thread holding a lower level mutex needs to lock the higher level one. In other words, the presence of up- calls makes it more likely that you will violate the partial order rule for locking mutexes. To avoid this, you should generally avoid holding a mutex while making an up- call (but this is easier said than done).
+
+## Version stamps
+
+Sometimes concurrency can make it more difficult to use cached information. This can happen when a separate thread executing at a lower level in your system invalidates some information known to a thread currently executing at a higher level. For example, information about a disk volume might change—either because of hardware problems or because the volume has been removed and replaced. You can use up- calls to invalidate cache structures at the higher level, but this will not invalidate state held locally by a thread. In the most extreme example, a thread might obtain information from a cache, and be about to call an operation at the lower level. Between the time the information comes from the cache and the time that the call actually occurs, the information might have become invalid.
+
+A technique known as "version stamps" can be useful here. In the low level abstraction you maintain a counter associated with the true data. Whenever the data changes, you increment the counter. (Assume the counter is large enough to never overflow.) Whenever a copy of some of the data is issued to a higher level, it is accompanied by the current value of the counter. If higher level code is caching the data, it caches the associated counter value too. Whenever you make a call back down to the lower level, and the call or its parameters depend on previously obtained data, you include the associated value of the counter. When the low level receives such a call, it compares the incoming value of the counter with the current truth value. If they are different it returns an exception to the higher level, which then knows to re- consider its call. (Sometimes, you can provide the new data with the exception). Incidentally, this technique is also useful when maintaining cached data across a distributed system.
+
+## Work crews
+
+There are situations that are best described as "an embarrassment of parallelism", when you can structure your program to have vastly more concurrency than can be efficiently accommodated on your machine. For example, a compiler implemented using concurrency
+
+===== Page 31 (번역) =====
+
+패킷을 수신할 준비가 된 스레드 풀(pool)을 유지합니다. 수신 스레드는 이더넷 프로토콜 유형에 따라 디스패치하고 네트워크 계층(예: DECnet 또는 IP)으로 업콜(up-call)하며, 그곳에서 다시 디스패치하고 전송 계층(예: TCP)으로 업콜하며, 거기서 최종적으로 적절한 연결로 디스패치됩니다. 일부 시스템에서는 이 업콜 패러다임이 애플리케이션까지 확장됩니다. 여기서의 장점은 고성능입니다. 불필요한 컨텍스트 스위치가 없습니다. 최고 성능의 네트워크 구현들은 모두 이런 식으로 구조화되어 있습니다.
+
+이 성능에 대한 대가를 치르게 됩니다. 평소처럼, 프로그래머의 작업은 더 복잡해졌습니다. 부분적으로는 각 계층이 이제 전통적인 다운콜(down-call) 인터페이스뿐만 아니라 업콜 인터페이스도 갖게 되었기 때문입니다. 그러나 동기화 문제도 더 섬세해졌습니다. 순수 하향식 시스템에서는 하위 계층을 호출하면서 한 계층의 뮤텍스를 보유하는 것이 괜찮습니다(하위 계층이 조건 변수에서 블록되어 앞서 논의한 중첩 모니터 교착 상태를 유발하지 않는 한). 그러나 업콜이 존재하는 경우, 하위 수준 뮤텍스를 보유한 업콜 스레드가 상위 수준 뮤텍스를 잠가야 한다면, 이는 뮤텍스만으로 교착 상태를 쉽게 유발할 수 있습니다. 즉, 업콜의 존재는 뮤텍스 잠금을 위한 부분 순서 규칙을 위반할 가능성을 더 높입니다. 이를 피하려면 일반적으로 업콜을 하는 동안 뮤텍스를 보유하지 않는 것이 좋습니다(하지만 말처럼 쉬운 일은 아닙니다).
+
+## 버전 스탬프 (Version stamps)
+
+때로는 동시성으로 인해 캐시된 정보를 사용하기가 더 어려워질 수 있습니다. 이는 시스템의 하위 수준에서 실행 중인 별도의 스레드가 현재 상위 수준에서 실행 중인 스레드가 알고 있는 일부 정보를 무효화(invalidate)할 때 발생할 수 있습니다. 예를 들어, 디스크 볼륨에 대한 정보는 하드웨어 문제나 볼륨이 제거되고 교체되었기 때문에 변경될 수 있습니다. 업콜을 사용하여 상위 수준의 캐시 구조를 무효화할 수 있지만, 이는 스레드가 로컬에 보유한 상태는 무효화하지 않습니다. 가장 극단적인 예로, 스레드가 캐시에서 정보를 얻고, 하위 수준에서 연산을 호출하려는 바로 그 순간, 정보가 캐시에서 나온 시점과 호출이 실제로 발생하는 시점 사이에 정보가 무효화될 수 있습니다.
+
+"버전 스탬프(version stamp)"로 알려진 기법이 여기서 유용할 수 있습니다. 하위 수준 추상화에서는 실제 데이터와 연관된 카운터를 유지합니다. 데이터가 변경될 때마다 카운터를 증가시킵니다. (카운터는 절대 오버플로되지 않을 만큼 충분히 크다고 가정합니다.) 데이터의 일부 복사본이 상위 수준으로 발행될 때마다 현재 카운터 값이 함께 제공됩니다. 상위 수준 코드가 데이터를 캐싱하는 경우, 연관된 카운터 값도 함께 캐싱합니다. 하위 수준으로 다시 호출할 때, 호출이나 그 매개변수가 이전에 얻은 데이터에 의존하는 경우, 연관된 카운터 값을 포함시킵니다. 하위 수준이 그러한 호출을 받으면, 들어오는 카운터 값과 현재의 실제 값을 비교합니다. 다르다면 상위 수준에 예외를 반환하고, 상위 수준은 호출을 재고(re-consider)하게 됩니다. (때로는 예외와 함께 새 데이터를 제공할 수도 있습니다). 덧붙여, 이 기법은 분산 시스템 전반에 걸쳐 캐시된 데이터를 유지할 때도 유용합니다.
+
+## 작업 크루 (Work crews)
+
+"병렬성의 과잉(an embarrassment of parallelism)"이라고 가장 잘 설명되는 상황이 있습니다. 기계가 효율적으로 수용할 수 있는 것보다 훨씬 더 많은 동시성을 갖도록 프로그램을 구조화할 수 있을 때입니다. 예를 들어, 동시성을 사용하여 구현된 컴파일러는
+
+================================================================================
+
+===== Page 32 (원문) =====
+
+might be willing to use a separate thread to compile each procedure, or even each statement. In such situations, if you fork one thread for each action you will create so many threads that the scheduler becomes quite inefficient, or so many that you have numerous lock conflicts, or so many that you run out of memory for the stacks.
+
+Your choice here is either to be more restrained in your forking, or to use an abstraction that will control your forking for you. Such an abstraction is described in Vandevoorde and Roberts' paper [17]. The basic idea is to enqueue requests for asynchronous activity and have a fixed pool of threads that perform the requests. The complexity comes in managing the requests, synchronizing between them, and coordinating the results. See the paper for a full description.
+
+An alternative proposal, which SRC has not yet explored, is to implement "Fork" in such a way that it defers actually creating the new thread until there is a processor available to run it. We call this proposal "lazy forking", but we have not pursued it any further.
+
+===== Page 32 (번역) =====
+
+각 프로시저나, 심지어 각 문장(statement)을 컴파일하기 위해 별도의 스레드를 사용하려 할 수 있습니다. 이러한 상황에서 각 동작에 대해 하나의 스레드를 포크하면, 스케줄러가 매우 비효율적이 될 정도로 많은 스레드를 생성하거나, 너무 많은 잠금 충돌(lock conflicts)이 발생하거나, 스택을 위한 메모리가 부족해질 수 있습니다.
+
+여기서 선택지는 포크를 더 자제하거나, 포크를 제어해 줄 추상화를 사용하는 것입니다. 그러한 추상화는 Vandevoorde와 Roberts의 논문 [17]에 설명되어 있습니다. 기본 아이디어는 비동기 활동(asynchronous activity)에 대한 요청을 큐에 넣고, 요청을 수행하는 고정된 스레드 풀(pool)을 갖는 것입니다. 복잡성은 요청 관리, 요청 간 동기화, 결과 조정에서 발생합니다. 전체 설명은 해당 논문을 참조하십시오.
+
+SRC가 아직 탐구하지 않은 대안적 제안은, "Fork"를 실행할 프로세서를 사용할 수 있을 때까지 실제로 새 스레드를 생성하는 것을 연기하는 방식으로 구현하는 것입니다. 우리는 이 제안을 "지연 포킹(lazy forking)"이라고 부르지만, 더 이상 추구하지 않았습니다.
+
+================================================================================

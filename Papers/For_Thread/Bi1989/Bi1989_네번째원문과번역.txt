@@ -1,0 +1,610 @@
+================================================================================
+파일명: Chapter5_USING_A_CONDITION_VARIABLE_번역.txt
+================================================================================
+
+===== Page 17 (원문) =====
+
+## USING A CONDITION VARIABLE: SCHEDULING SHARED RESOURCES
+
+A condition variable is used when the programmer wants to schedule the way in which multiple threads access some shared resource, and the simple one- at- a- time mutual exclusion provided by mutexes is not sufficient.
+
+Consider the following example, where one or more producer threads are passing data to one or more consumers. The data is transferred through an unbounded buffer formed by a linked list whose head is the global variable "head". If the linked list is empty, the consumer blocks on the condition variable "nonEmpty" until the producer generates some more data. The list and the condition variable are protected by the mutex "m".
+
+VAR m: Thread.Mutex;
+VAR head: List;
+PROCEDURE Consume(): List;
+VAR topElement: List;
+BEGIN
+LOCK m DO
+WHILE head = NIL DO
+Thread.Wait(m, nonEmpty)
+END;
+topElement := head;
+head := head^.next;
+END;
+RETURN topElement
+END Consume;
+PROCEDURE Produce(newElement: List);
+BEGIN
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+Thread.Signal(nonEmpty);
+END;
+END Produce;
+
+This is fairly straightforward, but there are still some subtleties. Notice that when a consumer returns from the call of "Wait" his first action after re- locking the mutex is to check once more whether the linked list is empty. This is an example of the following general pattern, which I strongly recommend for all your uses of condition variables.
+
+WHILE NOT expression DO Thread.Wait(m,c) END;
+
+===== Page 17 (번역) =====
+
+## 조건 변수 사용하기: 공유 자원 스케줄링 (USING A CONDITION VARIABLE: SCHEDULING SHARED RESOURCES)
+
+조건 변수(condition variable)는 프로그래머가 여러 스레드가 어떤 공유 자원에 접근하는 방식을 스케줄링하고자 할 때, 그리고 뮤텍스가 제공하는 단순한 한 번에 하나의 상호 배제만으로는 충분하지 않을 때 사용됩니다.
+
+하나 이상의 생산자(producer) 스레드가 하나 이상의 소비자(consumer) 스레드에게 데이터를 전달하는 다음 예를 생각해 보겠습니다. 데이터는 헤드가 전역 변수 "head"인 연결 리스트로 형성된 무제한 버퍼(unbounded buffer)를 통해 전송됩니다. 연결 리스트가 비어 있으면, 소비자는 생산자가 더 많은 데이터를 생성할 때까지 조건 변수 "nonEmpty"에서 블록됩니다. 리스트와 조건 변수는 뮤텍스 "m"에 의해 보호됩니다.
+
+VAR m: Thread.Mutex;
+VAR head: List;
+PROCEDURE Consume(): List;
+VAR topElement: List;
+BEGIN
+LOCK m DO
+WHILE head = NIL DO
+Thread.Wait(m, nonEmpty)
+END;
+topElement := head;
+head := head^.next;
+END;
+RETURN topElement
+END Consume;
+PROCEDURE Produce(newElement: List);
+BEGIN
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+Thread.Signal(nonEmpty);
+END;
+END Produce;
+
+이것은 상당히 직관적이지만, 여전히 몇 가지 미묘한 점이 있습니다. 소비자가 "Wait" 호출에서 반환될 때, 뮤텍스를 다시 잠근 후 첫 번째 동작은 연결 리스트가 비어 있는지 다시 한 번 확인하는 것입니다. 이는 다음 일반 패턴의 예시이며, 저는 조건 변수를 사용하는 모든 경우에 이 패턴을 강력히 권장합니다.
+
+WHILE NOT expression DO Thread.Wait(m,c) END;
+
+================================================================================
+
+===== Page 18 (원문) =====
+
+14 - An Introduction to Programming with Threads
+
+You might think that re- testing the expression is redundant: in the example above, the producer made the list non- empty before calling "Signal". But the semantics of "Signal" do not guarantee that the awoken thread will be the next to lock the mutex. It is possible that some other consumer thread will intervene, lock the mutex, remove the list element and unlock the mutex, before the newly awoken thread can lock the mutex.5 A second reason for re- checking is local to the SRC design: we decided to permit the implementation of "Signal" to (rarely) awaken more than one thread, because this allowed us to generate more efficient code for the "Wait" and "Signal" primitives.
+
+But the main reason for advocating use of this pattern is to make your program more obviously, and more robustly, correct. With this style it is immediately clear that the "expression" is true before the following statements are executed. Without it, this fact could be verified only by looking at all the places that might signal the condition variable. In other words, this programming convention allows you to verify correctness by local inspection, which is always preferable to global inspection.
+
+A final advantage of this convention is that it allows for simple programming of calls to "Signal" or "Broadcast"—extra wake- ups are benign. Carefully coding to ensure that only the correct threads are awoken is now only a performance question, not a correctness one (but of course you must ensure that at least the correct threads are awoken).
+
+## Using "Broadcast"
+
+The "Signal" primitive is useful if you know that at most one thread can usefully be awoken. "Broadcast" awakens all threads that have called "Wait". If you always program in the recommended style of re- checking an expression after return from "Wait", then the correctness of your program will be unaffected if you replace calls of "Signal" with calls of "Broadcast".
+
+One use of "Broadcast" is when you want to simplify your program by awakening multiple threads, even though you know that not all of them can make progress. This allows you to be less careful about separating different wait reasons into different condition variables. This use trades slightly poorer performance for greater simplicity. Another use of "Broadcast" is when you really need to awaken multiple threads, because the resource you have just made available can be used by multiple other threads.
+
+A simple example where "Broadcast" is useful is in the scheduling policy known as shared/exclusive locking (or readers/writers locking). Most commonly this is used when you have some shared data being read and written by various threads: your algorithm will be correct (and perform better) if you allow multiple threads to read the data concurrently, but a thread modifying the data must do so when no other thread is accessing the data.
+
+The following procedures implement this scheduling policy. Any thread wanting to read your data calls "AcquireShared", then reads the data, then calls "ReleaseShared". Similarly any thread wanting to modify the data calls "AcquireExclusive", then modifies the data, then calls "ReleaseExclusive". When the variable "i" is greater than zero, it counts the number of active readers. When it is negative there is an active writer. When it
+
+===== Page 18 (번역) =====
+
+14 - An Introduction to Programming with Threads
+
+표현식을 다시 테스트하는 것은 중복된다고 생각할 수 있습니다. 위의 예에서 생산자는 "Signal"을 호출하기 전에 리스트를 비어 있지 않게 만들었습니다. 그러나 "Signal"의 의미론은 깨워진 스레드가 다음으로 뮤텍스를 잠글 것이라고 보장하지 않습니다. 새로 깨워진 스레드가 뮤텍스를 잠그기 전에, 다른 소비자 스레드가 개입하여 뮤텍스를 잠그고, 리스트 요소를 제거하고, 뮤텍스를 잠금 해제할 가능성이 있습니다.5 다시 확인하는 두 번째 이유는 SRC 설계에 국한됩니다. 우리는 "Signal"의 구현이 (드물게) 하나 이상의 스레드를 깨우는 것을 허용하기로 결정했습니다. 이는 "Wait"과 "Signal" 기본 연산에 대해 더 효율적인 코드를 생성할 수 있게 해주었기 때문입니다.
+
+그러나 이 패턴의 사용을 옹호하는 주된 이유는 프로그램을 더 명확하고, 더 견고하게 올바르게 만들기 위해서입니다. 이 스타일을 사용하면 다음 문장들이 실행되기 전에 "expression"이 참(true)이라는 것이 즉시 명확해집니다. 이 패턴이 없다면, 이 사실은 조건 변수에 시그널을 보낼 수 있는 모든 위치를 조사해야만 검증할 수 있습니다. 즉, 이 프로그래밍 관례는 지역적 검사(local inspection)를 통한 정확성 검증을 가능하게 하며, 이는 항상 전역적 검사(global inspection)보다 우수합니다.
+
+이 관례의 마지막 장점은 "Signal" 또는 "Broadcast" 호출의 프로그래밍을 단순하게 만들어 준다는 것입니다. 추가적인 깨우기(extra wake-ups)는 무해합니다. 오직 올바른 스레드만 깨워지도록 주의 깊게 코딩하는 것은 이제 정확성 문제가 아니라 성능 문제입니다 (물론 적어도 올바른 스레드가 깨어나도록 해야 합니다).
+
+## "Broadcast" 사용하기 (Using "Broadcast")
+
+"Signal" 기본 연산은 기껏해야 하나의 스레드만 유용하게 깨울 수 있다는 것을 알 때 유용합니다. "Broadcast"는 "Wait"을 호출한 모든 스레드를 깨웁니다. "Wait"에서 반환된 후 표현식을 다시 확인하는 권장 스타일로 항상 프로그래밍한다면, "Signal" 호출을 "Broadcast" 호출로 대체해도 프로그램의 정확성은 영향받지 않습니다.
+
+"Broadcast"의 한 가지 용도는, 모든 스레드가 진행할 수는 없다는 것을 알면서도 여러 스레드를 깨워 프로그램을 단순화하고자 할 때입니다. 이는 서로 다른 대기 이유를 다른 조건 변수로 분리하는 것에 대해 덜 주의하게 해줍니다. 이 사용법은 약간 더 낮은 성능과 더 큰 단순성을 맞바꾸는 것입니다. "Broadcast"의 또 다른 용도는 방금 사용 가능하게 만든 자원을 여러 다른 스레드가 사용할 수 있기 때문에 정말로 여러 스레드를 깨워야 할 때입니다.
+
+"Broadcast"가 유용한 간단한 예는 공유/배타적 잠금(shared/exclusive locking, 또는 읽기/쓰기 잠금 readers/writers locking)으로 알려진 스케줄링 정책입니다. 가장 일반적으로 이것은 여러 스레드에 의해 읽고 쓰여지는 일부 공유 데이터가 있을 때 사용됩니다. 여러 스레드가 동시에 데이터를 읽는 것을 허용하면 알고리즘이 올바르게 동작하고 (성능도 더 좋아지지만), 데이터를 수정하는 스레드는 다른 어떤 스레드도 데이터에 접근하지 않을 때 수행해야 합니다.
+
+다음 프로시저들은 이 스케줄링 정책을 구현합니다. 데이터를 읽으려는 모든 스레드는 "AcquireShared"를 호출하고, 데이터를 읽은 다음, "ReleaseShared"를 호출합니다. 마찬가지로 데이터를 수정하려는 모든 스레드는 "AcquireExclusive"를 호출하고, 데이터를 수정한 다음, "ReleaseExclusive"를 호출합니다. 변수 "i"가 0보다 클 때는 활성 읽기 스레드(reader)의 수를 셉니다. "i"가 음수일 때는 활성 쓰기 스레드(writer)가 있습니다.
+
+================================================================================
+
+===== Page 19 (원문) =====
+
+is zero, no thread is using the data. If a potential reader inside "AcquireShared" finds that "i" is less than zero, it must block until the writer calls "ReleaseExclusive".
+
+VAR i: INTEGER;
+VAR m: Thread.Mutex;
+VAR c: Thread.Condition;
+
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+WHILE i # 0 DO
+Thread.Wait(m,c)
+END;
+i := - 1;
+END;
+END AcquireExclusive;
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+WHILE i < 0 DO
+Thread.Wait(m,c)
+END;
+i := i+1;
+END;
+END AcquireShared;
+
+PROCEDURE ReleaseExclusive();
+BEGIN
+LOCK m DO
+i := 0;
+Thread.Broadcast(c);
+END;
+END ReleaseExclusive;
+
+PROCEDURE ReleaseShared();
+BEGIN
+LOCK m DO
+i := i- 1;
+IF i = 0 THEN Thread.Signal(c) END;
+END;
+END ReleaseShared;
+
+Using "Broadcast" is convenient in "ReleaseExclusive", because a terminating writer does not need to know how many readers are now able to proceed. But notice that you could re- code this example using just "Signal", by adding a counter of how many readers are waiting, and calling "Signal" that many times in "ReleaseExclusive". The "Broadcast" facility is just a convenience, taking advantage of information already available to the threads implementation. Notice that there is no reason to use "Broadcast" in "ReleaseShared", because we know that at most one blocked writer can usefully make progress.
+
+This particular encoding of shared/exclusive locking exemplifies many of the problems that can occur when using condition variables, as we will see in the following
+
+===== Page 19 (번역) =====
+
+"i"가 0일 때는 어떤 스레드도 데이터를 사용하지 않습니다. "AcquireShared" 내부의 잠재적 읽기 스레드는 "i"가 0보다 작은 것을 발견하면, 쓰기 스레드가 "ReleaseExclusive"를 호출할 때까지 블록되어야 합니다.
+
+VAR i: INTEGER;
+VAR m: Thread.Mutex;
+VAR c: Thread.Condition;
+
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+WHILE i # 0 DO
+Thread.Wait(m,c)
+END;
+i := - 1;
+END;
+END AcquireExclusive;
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+WHILE i < 0 DO
+Thread.Wait(m,c)
+END;
+i := i+1;
+END;
+END AcquireShared;
+
+PROCEDURE ReleaseExclusive();
+BEGIN
+LOCK m DO
+i := 0;
+Thread.Broadcast(c);
+END;
+END ReleaseExclusive;
+
+PROCEDURE ReleaseShared();
+BEGIN
+LOCK m DO
+i := i- 1;
+IF i = 0 THEN Thread.Signal(c) END;
+END;
+END ReleaseShared;
+
+"ReleaseExclusive"에서 "Broadcast"를 사용하는 것은 편리합니다. 종료되는 쓰기 스레드가 얼마나 많은 읽기 스레드가 이제 진행할 수 있는지 알 필요가 없기 때문입니다. 그러나 이 예제는 "Signal"만 사용하여 다시 코딩할 수도 있습니다. 대기 중인 읽기 스레드의 수를 세는 카운터를 추가하고, "ReleaseExclusive"에서 그 횟수만큼 "Signal"을 호출하면 됩니다. "Broadcast" 기능은 단순히 스레드 구현에 이미 사용 가능한 정보를 활용하는 편의 기능일 뿐입니다. "ReleaseShared"에서 "Broadcast"를 사용할 이유가 없다는 점에 유의하세요. 최대 하나의 블록된 쓰기 스레드만 유용하게 진행할 수 있다는 것을 알고 있기 때문입니다.
+
+공유/배타적 잠금의 이 특정 인코딩은 조건 변수를 사용할 때 발생할 수 있는 많은 문제들을 예시로 보여줍니다. 다음 절들에서 살펴보겠지만,
+
+================================================================================
+
+===== Page 20 (원문) =====
+
+sections. As we discuss these problems, I will present revised encodings of this locking paradigm.
+
+## Spurious wake-ups
+
+If you keep your use of condition variables very simple, you might introduce the possibility of awakening threads that cannot make useful progress. This can happen if you use "Broadcast" when "Signal" would be sufficient, or if you have threads waiting on a single condition variable for multiple different reasons. For example, the shared/exclusive locking procedures shown earlier use just one condition variable for readers as well as writers. This means that when we call "Broadcast" in "ReleaseExclusive", the effect will be to awaken both classes of blocked threads. But if a reader is first to lock the mutex, it will increment "i" and prevent an awoken potential writer from making progress until the reader later calls "ReleaseShared". The cost of this is extra time spent in the thread scheduler, which is typically an expensive place to be. If your problem is such that these spurious wake- ups will be common, and unless your scheduler is unusually efficient, you should probably separate the blocked threads onto two condition variables—one for readers and one for writers. A terminating reader need only signal the writers' condition variable; a terminating writer would signal one of them, depending on which was non- empty. With this change, the procedures would look as follows.
+
+VAR i: INTEGER;
+VAR m: Thread.Mutex;
+VAR cR, cW: Thread.Condition;
+VAR readWaiters: INTEGER;
+
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+WHILE i # 0 DO
+Thread.Wait(m,cW)
+END;
+i := - 1;
+END;
+END AcquireExclusive;
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+readWaiters := readWaiters+1;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+END AcquireShared;
+
+===== Page 20 (번역) =====
+
+이러한 문제들을 논의하면서 이 잠금 패러다임의 수정된 인코딩을 제시하겠습니다.
+
+## 잘못된 깨우기 (Spurious wake-ups)
+
+조건 변수 사용을 매우 단순하게 유지하면, 유용하게 진행할 수 없는 스레드를 깨울 가능성을 도입할 수 있습니다. 이는 "Signal"로 충분할 때 "Broadcast"를 사용하거나, 여러 다른 이유로 스레드들이 단일 조건 변수에서 대기할 때 발생할 수 있습니다. 예를 들어, 앞서 보여준 공유/배타적 잠금 프로시저들은 읽기 스레드와 쓰기 스레드 모두에 대해 단 하나의 조건 변수만 사용합니다. 이는 "ReleaseExclusive"에서 "Broadcast"를 호출할 때, 효과가 블록된 두 부류의 스레드를 모두 깨우는 것임을 의미합니다. 그러나 읽기 스레드가 먼저 뮤텍스를 잠그면, "i"를 증가시키고, 깨워진 잠재적 쓰기 스레드가 읽기 스레드가 나중에 "ReleaseShared"를 호출할 때까지 진행하지 못하게 막습니다. 그 대가는 스레드 스케줄러에서 추가 시간을 소비하는 것이며, 이는 일반적으로 비용이 많이 드는 부분입니다. 이러한 잘못된 깨우기가 흔할 것이고, 스케줄러가 특별히 효율적이지 않다면, 블록된 스레드들을 두 개의 조건 변수(하나는 읽기 스레드용, 하나는 쓰기 스레드용)로 분리하는 것이 좋습니다. 종료되는 읽기 스레드는 쓰기 스레드용 조건 변수에만 시그널을 보내면 됩니다. 종료되는 쓰기 스레드는 어느 쪽이 비어 있지 않은지에 따라 그중 하나에 시그널을 보냅니다. 이 변경으로 프로시저들은 다음과 같이 보일 것입니다.
+
+VAR i: INTEGER;
+VAR m: Thread.Mutex;
+VAR cR, cW: Thread.Condition;
+VAR readWaiters: INTEGER;
+
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+WHILE i # 0 DO
+Thread.Wait(m,cW)
+END;
+i := - 1;
+END;
+END AcquireExclusive;
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+readWaiters := readWaiters+1;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+END AcquireShared;
+
+================================================================================
+
+===== Page 21 (원문) =====
+
+An Introduction to Programming with Threads␣␣␣␣␣.␣␣␣␣␣17
+PROCEDURE ReleaseExclusive();
+BEGIN
+LOCK m DO
+i := 0;
+IF readWaiters > 0 THEN
+Thread.Broadcast(cR);
+ELSE
+Thread.Signal(cW);
+END;
+END;
+END ReleaseExclusive;
+PROCEDURE ReleaseShared();
+BEGIN
+LOCK m DO
+i := i-1;
+IF i = 0 THEN Thread.Signal(cW) END;
+END;
+END ReleaseShared;
+Spurious lock conflicts
+The straightforward use of condition variables can lead to excessive scheduling overhead.
+In the reader/writer example, when a terminating reader inside “ReleaseShared” calls
+“Signal”, it still has the mutex locked. On a uni-processor this would often not be a
+problem, but on a multi-processor the effect is liable to be that a potential writer is
+awakened inside “Wait”, executes a few instructions, and then blocks trying to lock the
+mutex—because it is still held by the terminating reader, executing concurrently. A few
+microseconds later the terminating reader unlocks the mutex, allowing the writer to
+continue. This has cost us two extra re-schedule operations, which is a significant
+expense.
+This is a common situation, and it has a simple solution. Since the terminating
+reader does not access the data protected by the mutex after the call of “Signal”, we can
+move that call to after the end of the lock clause, as follows. Notice that accessing “i” is
+still protected by the mutex.
+PROCEDURE ReleaseShared();
+VAR doSignal: BOOLEAN;
+BEGIN
+LOCK m DO
+i := i-1;
+doSignal := (i=0);
+END;
+IF doSignal THEN Thread.Signal(cW) END;
+END ReleaseShared;
+There is a more complicated case of spurious lock conflicts when a terminating writer
+calls “Broadcast”. First, it does so with the mutex held. But also, only one of the waiting
+
+===== Page 21 (번역) =====
+
+An Introduction to Programming with Threads␣␣␣␣␣.␣␣␣␣␣17
+PROCEDURE ReleaseExclusive();
+BEGIN
+LOCK m DO
+i := 0;
+IF readWaiters > 0 THEN
+Thread.Broadcast(cR);
+ELSE
+Thread.Signal(cW);
+END;
+END;
+END ReleaseExclusive;
+PROCEDURE ReleaseShared();
+BEGIN
+LOCK m DO
+i := i-1;
+IF i = 0 THEN Thread.Signal(cW) END;
+END;
+END ReleaseShared;
+잘못된 잠금 충돌 (Spurious lock conflicts)
+조건 변수의 직접적인 사용은 과도한 스케줄링 오버헤드를 초래할 수 있습니다.
+읽기/쓰기 예제에서 "ReleaseShared" 내부의 종료되는 읽기 스레드가 "Signal"을 호출할 때, 여전히 뮤텍스를 잠그고 있습니다. 단일 프로세서(uni-processor)에서는 종종 문제가 되지 않지만, 멀티프로세서(multi-processor)에서는 잠재적 쓰기 스레드가 "Wait" 내부에서 깨어나 몇 가지 명령어를 실행한 후, 뮤텍스를 잠그려고 시도하다 블록되는 결과를 초래하기 쉽습니다. 왜냐하면 뮤텍스가 여전히 동시에 실행 중인 종료되는 읽기 스레드에 의해 보유되고 있기 때문입니다. 몇 마이크로초 후에 종료되는 읽기 스레드가 뮤텍스를 잠금 해제하여 쓰기 스레드가 계속할 수 있게 합니다. 이로 인해 두 번의 추가 재스케줄링(re-schedule) 비용이 발생하며, 이는 상당한 비용입니다.
+이것은 흔한 상황이며, 간단한 해결책이 있습니다. 종료되는 읽기 스레드는 "Signal" 호출 이후에 뮤텍스가 보호하는 데이터에 접근하지 않으므로, 다음과 같이 해당 호출을 잠금 절의 끝 이후로 옮길 수 있습니다. "i"에 접근하는 것은 여전히 뮤텍스에 의해 보호된다는 점에 유의하세요.
+PROCEDURE ReleaseShared();
+VAR doSignal: BOOLEAN;
+BEGIN
+LOCK m DO
+i := i-1;
+doSignal := (i=0);
+END;
+IF doSignal THEN Thread.Signal(cW) END;
+END ReleaseShared;
+종료되는 쓰기 스레드가 "Broadcast"를 호출할 때 더 복잡한 경우의 잘못된 잠금 충돌이 있습니다. 첫째, 쓰기 스레드는 뮤텍스를 보유한 상태에서 이를 수행합니다. 그러나 또한, 대기 중인
+
+================================================================================
+
+===== Page 22 (원문) =====
+
+readers at a time can lock the mutex to re- check and increment "i", so on a multiprocessor other awoken readers are liable to block trying to lock the mutex (this is quite unlikely on a uni- processor). If necessary, we can correct this by awakening just one reader in "ReleaseExclusive" (by calling "Signal" instead of "Broadcast"), and having each reader in turn awaken the next, as follows.
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+readWaiters := readWaiters+1;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+Thread.Signal(cR);
+END AcquireShared;
+
+## Starvation
+
+Whenever you have a program that is making scheduling decisions, you must worry about how fair these decisions are; in other words, are all threads equal or are some more favored? When you are using a mutex, this consideration is dealt with for you by the threads implementation—typically by a first- in- first- out rule for each priority level. Mostly, this is also true for condition variables. But sometimes the programmer must become involved. The most extreme form of unfairness is "starvation", where some thread will never make progress. This can arise in our reader- writer locking example (of course). If the system is heavily loaded, so that there is always at least one thread wanting to be a reader, the existing code will starve writers. This would occur with the following pattern.
+
+Thread A calls "AcquireShared"; i := 1;
+Thread B calls "AcquireShared"; i := 2;
+Thread A calls "ReleaseShared"; i := 1;
+Thread C calls "AcquireShared"; i := 2;
+Thread B calls "ReleaseShared"; i := 1;
+etc.
+
+Since there is always an active reader, there is never a moment when a writer can proceed; potential writers will always remain blocked, waiting for "i" to reduce to 0. If the load is such that this is really a problem, we need to make the code yet more complicated. For example, we could arrange that a new reader would defer inside "AcquireShared" if there was a blocked potential writer. We could do this by adding a counter for blocked writers, as follows.
+
+VAR writeWaiters: INTEGER;
+PROCEDURE AcquireShared();
+BEGIN
+
+===== Page 22 (번역) =====
+
+읽기 스레드 중 한 번에 하나만이 뮤텍스를 잠그고 "i"를 다시 확인하고 증가시킬 수 있으므로, 멀티프로세서에서는 다른 깨워진 읽기 스레드들이 뮤텍스를 잠그려고 시도하다 블록될 가능성이 높습니다 (단일 프로세서에서는 매우 unlikely합니다). 필요한 경우, "ReleaseExclusive"에서 단 하나의 읽기 스레드만 깨우고("Broadcast" 대신 "Signal" 호출), 각 읽기 스레드가 차례로 다음 읽기 스레드를 깨우도록 함으로써 이를 수정할 수 있습니다.
+
+PROCEDURE AcquireShared();
+BEGIN
+LOCK m DO
+readWaiters := readWaiters+1;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+Thread.Signal(cR);
+END AcquireShared;
+
+## 기아 상태 (Starvation)
+
+스케줄링 결정을 내리는 프로그램을 만들 때마다, 이러한 결정이 얼마나 공정한지 고민해야 합니다. 즉, 모든 스레드가 평등한가, 아니면 어떤 스레드가 더 선호되는가? 뮤텍스를 사용할 때는 이 고려 사항이 스레드 구현에 의해 처리됩니다. 일반적으로 각 우선순위 수준에 대해 선입선출(FIFO) 규칙에 따릅니다. 대부분 조건 변수에 대해서도 마찬가지입니다. 그러나 때로는 프로그래머가 개입해야 합니다. 불공정의 가장 극단적인 형태는 어떤 스레드가 결코 진행할 수 없는 "기아 상태(starvation)"입니다. 이는 우리의 읽기-쓰기 잠금 예제에서도 발생할 수 있습니다. 시스템에 부하가 심해서 항상 적어도 하나의 읽기 스레드가 되기를 원하는 경우, 기존 코드는 쓰기 스레드를 기아 상태에 빠뜨릴 것입니다. 이는 다음과 같은 패턴으로 발생합니다.
+
+스레드 A가 "AcquireShared" 호출; i := 1;
+스레드 B가 "AcquireShared" 호출; i := 2;
+스레드 A가 "ReleaseShared" 호출; i := 1;
+스레드 C가 "AcquireShared" 호출; i := 2;
+스레드 B가 "ReleaseShared" 호출; i := 1;
+등등...
+
+항상 활성 읽기 스레드가 있기 때문에 쓰기 스레드가 진행할 수 있는 순간은 결코 없습니다. 잠재적 쓰기 스레드들은 "i"가 0으로 감소하기를 기다리며 항상 블록된 상태로 남아 있습니다. 부하가 실제로 문제가 될 만큼 심각하다면, 코드를 더 복잡하게 만들어야 합니다. 예를 들어, 블록된 잠재적 쓰기 스레드가 있으면 새로운 읽기 스레드가 "AcquireShared" 내부에서 양보하도록(defer) 구성할 수 있습니다. 이를 위해 블록된 쓰기 스레드에 대한 카운터를 추가할 수 있습니다.
+
+VAR writeWaiters: INTEGER;
+PROCEDURE AcquireShared();
+BEGIN
+
+================================================================================
+
+===== Page 23 (원문) =====
+
+LOCK m DO
+readWaiters := readWaiters+1;
+IF writeWaiters > 0 THEN
+Thread.Signal(cW);
+Thread.Wait(m,cR);
+END;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+Thread.Signal(cR);
+END AcquireShared;
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+writeWaiters := writeWaiters+1;
+WHILE i # 0 DO
+Thread.Wait(m,cW)
+END;
+writeWaiters := writeWaiters- 1;
+i := - 1;
+END;
+END AcquireExclusive;
+
+There is no limit to how complicated this can become, implementing ever more elaborate scheduling policies. The programmer must exercise restraint, and only add such features if they are really required by the actual load on the resource.
+
+## Complexity
+
+As you can see, worrying about these spurious wake- ups, lock conflicts and starvation makes the program more complicated. The first solution of the reader/writer problem that I showed you had 15 lines inside the procedure bodies; the final version had 30 lines, and some quite subtle reasoning about its correctness. You need to consider, for each case, whether the potential cost of ignoring the problem is enough to merit writing a more complex program. This decision will depend on the performance characteristics of your threads implementation, on whether you are using a multi- processor, and on the expected load on your resource. In particular, if your resource is mostly not in use then the performance effects will not be a problem, and you should adopt the simplest coding style.
+
+Usually, I find that moving the call of "Signal" to beyond the end of the LOCK clause is easy and worth the trouble, and that the other performance enhancements are not worth making. But sometimes they are important, and you should only ignore them after explicitly considering whether they are required in your particular situation.
+
+## Deadlock
+
+You can introduce deadlocks by using condition variables. For example, if you have two resources (call them (1) and (2)), the following sequence of actions produces a deadlock.
+
+===== Page 23 (번역) =====
+
+LOCK m DO
+readWaiters := readWaiters+1;
+IF writeWaiters > 0 THEN
+Thread.Signal(cW);
+Thread.Wait(m,cR);
+END;
+WHILE i < 0 DO
+Thread.Wait(m,cR)
+END;
+readWaiters := readWaiters- 1;
+i := i+1;
+END;
+Thread.Signal(cR);
+END AcquireShared;
+PROCEDURE AcquireExclusive();
+BEGIN
+LOCK m DO
+writeWaiters := writeWaiters+1;
+WHILE i # 0 DO
+Thread.Wait(m,cW)
+END;
+writeWaiters := writeWaiters- 1;
+i := - 1;
+END;
+END AcquireExclusive;
+
+이것이 얼마나 복잡해질 수 있는지에는 한계가 없으며, 점점 더 정교한 스케줄링 정책을 구현하게 됩니다. 프로그래머는 자제력을 발휘해야 하며, 자원의 실제 부하에 의해 정말로 필요한 경우에만 이러한 기능들을 추가해야 합니다.
+
+## 복잡성 (Complexity)
+
+보시다시피, 이러한 잘못된 깨우기, 잠금 충돌 및 기아 상태에 대해 고민하면 프로그램이 더 복잡해집니다. 제가 보여드린 읽기/쓰기 문제의 첫 번째 해결책은 프로시저 본문 내에 15줄이 있었습니다. 최종 버전은 30줄이었으며, 정확성에 대한 상당히 미묘한 추론이 필요했습니다. 각각의 경우에 대해, 문제를 무시함으로써 발생할 잠재적 비용이 더 복잡한 프로그램을 작성할 가치가 있는지 고려해야 합니다. 이 결정은 스레드 구현의 성능 특성, 멀티프로세서 사용 여부, 그리고 자원에 대한 예상 부하에 따라 달라집니다. 특히, 자원이 대부분 사용되지 않는다면 성능 영향은 문제가 되지 않으므로 가장 간단한 코딩 스타일을 채택해야 합니다.
+
+일반적으로 저는 "Signal" 호출을 LOCK 절의 끝 이후로 옮기는 것은 쉽고 그만한 가치가 있으며, 다른 성능 향상은 가치가 없다고 생각합니다. 그러나 때로는 중요할 수도 있으므로, 특정 상황에서 필요한지 명시적으로 고려한 후에만 무시해야 합니다.
+
+## 교착 상태 (Deadlock)
+
+조건 변수를 사용하면 교착 상태(deadlock)를 도입할 수 있습니다. 예를 들어, 두 개의 자원((1)과 (2)라고 부르겠습니다)이 있을 때, 다음 동작 순서는 교착 상태를 생성합니다.
+
+================================================================================
+
+===== Page 24 (원문) =====
+
+Thread A acquires resource (1);
+Thread B acquires resource (2);
+Thread A wants (2), so it waits on (2)'s condition variable;
+Thread B wants (1), so it waits on (1)'s condition variable.
+
+Deadlocks such as this are not significantly different from the ones we discussed in connection with mutexes. You should arrange that there is a partial order on the resources managed with condition variables, and that each thread wishing to acquire multiple resources does so according to this order. So, for example, you might decide that (1) is ordered before (2). Then thread B would not be permitted to try to acquire (1) while holding (2), so the deadlock would not occur.
+
+One interaction between condition variables and mutexes is a subtle source of deadlock. Consider the following two procedures.
+
+VAR a, b: Thread.Mutex;
+VAR c: Thread.Condition;
+VAR ready: BOOLEAN;
+PROCEDURE Get();
+BEGIN
+LOCK a DO
+LOCK b DO
+WHILE NOT ready DO
+Thread.Wait(b,c)
+END;
+END;
+END Get;
+PROCEDURE Give();
+BEGIN
+LOCK a DO
+LOCK b DO
+ready := TRUE;
+Thread.Signal(c);
+END;
+END;
+END Give;
+
+If "ready" is FALSE and thread A calls "Get", it will block on a call of "Wait(b,c)". This unlocks "b", but leaves "a" locked. So if thread B calls "Give", intending to cause a call of "Signal(c)", it will instead block trying to lock "a", and your program will have deadlocked. Clearly, this example is trivial, since mutex "a" does not protect any data (and the potential for deadlock is quite apparent anyway), but the overall pattern does occur.
+
+Most often this problem occurs when you lock a mutex at one abstraction level of your program then call down to a lower level, which (unknown to the higher level) blocks. If this block can be freed only by a thread that is holding the higher level mutex, you will deadlock. It is generally risky to call into a lower level abstraction while holding one of your mutexes, unless you understand fully the circumstances under which the called procedure might block. One solution here is to explicitly unlock the mutex before calling the lower level abstraction, as we discussed earlier; but as we discussed, this
+
+===== Page 24 (번역) =====
+
+스레드 A가 자원 (1)을 획득;
+스레드 B가 자원 (2)를 획득;
+스레드 A가 (2)를 원하므로 (2)의 조건 변수에서 대기;
+스레드 B가 (1)을 원하므로 (1)의 조건 변수에서 대기.
+
+이러한 교착 상태는 뮤텍스와 관련하여 논의한 것과 크게 다르지 않습니다. 조건 변수로 관리되는 자원들에 대한 부분 순서(partial order)를 정하고, 여러 자원을 획득하려는 각 스레드가 이 순서에 따라 수행하도록 해야 합니다. 예를 들어, (1)이 (2)보다 먼저라고 정할 수 있습니다. 그러면 스레드 B는 (2)를 보유한 상태에서 (1)을 획득하려고 시도할 수 없으므로 교착 상태는 발생하지 않을 것입니다.
+
+조건 변수와 뮤텍스 간의 한 가지 상호작용은 미묘한 교착 상태의 원인입니다. 다음 두 프로시저를 생각해 보겠습니다.
+
+VAR a, b: Thread.Mutex;
+VAR c: Thread.Condition;
+VAR ready: BOOLEAN;
+PROCEDURE Get();
+BEGIN
+LOCK a DO
+LOCK b DO
+WHILE NOT ready DO
+Thread.Wait(b,c)
+END;
+END;
+END Get;
+PROCEDURE Give();
+BEGIN
+LOCK a DO
+LOCK b DO
+ready := TRUE;
+Thread.Signal(c);
+END;
+END;
+END Give;
+
+"ready"가 FALSE이고 스레드 A가 "Get"을 호출하면, "Wait(b,c)" 호출에서 블록됩니다. 이는 "b"의 잠금을 해제하지만 "a"는 잠긴 상태로 둡니다. 따라서 스레드 B가 "Give"를 호출하여 "Signal(c)" 호출을 의도하면, 대신 "a"를 잠그려고 시도하다 블록될 것이고, 프로그램은 교착 상태에 빠질 것입니다. 분명히 이 예제는 뮤텍스 "a"가 어떤 데이터도 보호하지 않기 때문에 (그리고 교착 상태 가능성이 어쨌든 상당히 명백하기 때문에) 사소합니다. 그러나 전체적인 패턴은 실제로 발생합니다.
+
+이 문제는 가장 흔히 프로그램의 한 추상화 수준에서 뮤텍스를 잠근 다음, (상위 수준이 알지 못하는 사이에) 블록되는 하위 수준으로 호출할 때 발생합니다. 이 블록이 상위 수준 뮤텍스를 보유하고 있는 스레드에 의해서만 해제될 수 있다면 교착 상태에 빠질 것입니다. 호출된 프로시저가 어떤 상황에서 블록될 수 있는지 완전히 이해하지 못하는 한, 뮤텍스를 보유한 상태에서 하위 수준 추상화를 호출하는 것은 일반적으로 위험합니다. 여기 한 가지 해결책은 앞서 논의한 대로 하위 수준 추상화를 호출하기 전에 명시적으로 뮤텍스를 잠금 해제하는 것입니다. 그러나 우리가 논의했듯이,
+
+================================================================================
+
+===== Page 25 (원문) =====
+
+solution has its own dangers. A better solution is to arrange to end the LOCK clause before calling down. You can find further discussions of this problem, known as the "nested monitor problem", in the literature [8].
+
+===== Page 25 (번역) =====
+
+이 해결책에는 고유한 위험이 있습니다. 더 나은 해결책은 하위 호출을 하기 전에 LOCK 절을 종료하도록 구성하는 것입니다. "중첩 모니터 문제(nested monitor problem)"로 알려진 이 문제에 대한 추가 논의는 문헌 [8]에서 찾을 수 있습니다.
+
+================================================================================

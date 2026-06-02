@@ -1,0 +1,151 @@
+================================================================================
+파일명: Appendix_OTHER_THREAD_DESIGNS_번역.txt
+================================================================================
+
+===== Page 35 (원문) =====
+
+1
+
+## APPENDIX: OTHER THREAD DESIGNS
+
+In the main body of the paper we were talking entirely in terms of the SRC threads design. That design is quite similar to several other, more publicly available designs. In this appendix, I compare some other designs with SRC's. Where the corresponding features of the other designs differ from SRC's, I try to give you some hints on when and how those differences will be useful or dangerous.
+
+The descriptions here assume that you are reasonably familiar with the original documentation for each of these systems. Please read the documentation yourself before relying on any of the material in this appendix, and please accept my apologies if I have mis- represented your favorite system.
+
+Each design (including SRC's) includes mechanisms that I haven't discussed in this paper. For example, each design has facilities for affecting scheduling decisions (by adjusting priorities, or giving hints on when a pre- emption would be useful); SRC and Sun provide facilities for associating context information with a thread; each system provides a "conditional lock" operation on a mutex. Limits on time and patience preclude exploring these here.
+
+You should bear in mind that each of these systems (including SRC's) is equivalent, in the sense that you can (at least) reproduce one system's facilities by programming on top of another system's. You can solve any concurrent programming problem by using any of these systems. The effect of the differences is just that they make some programming paradigms (good ones or bad ones) easier, and some harder.
+
+The following table summarizes the approximate equivalence between the major SRC facilities and those of Apollo [2], Sun [14,15] and MACH [1,6,16]. The absence of an entry means that I cannot see a reasonably equivalent facility in the documentation I have read. The following sections discuss ways in which these facilities differ from SRC's.
+
+| SRC | Apollo Domain CPS | Sun release 4.0 | MACH C threads |
+|-----|------------------|-----------------|----------------|
+| Fork | task_create | lwp_create | cthread_fork |
+| Join | task_join | (없음) | cthread_join |
+| Mutex | task_handle_t | mutex_t | mutex_t |
+| LOCK ... END | mutex_lock / mutex_unlock | mutex_enter / mutex_exit | mutex_lock / mutex_unlock |
+| Condition | ec2_eventcount_t | cv_t | condition_t |
+| Wait | ec2_wait | cv_wait | condition_wait |
+| Broadcast | ec2_advance | cv_broadcast | condition_broadcast |
+| Signal | (없음) | cv_notify | condition_signal |
+| Alert | task_signal | (없음) | (없음) |
+
+===== Page 35 (번역) =====
+
+1
+
+## 부록: 다른 스레드 설계들 (APPENDIX: OTHER THREAD DESIGNS)
+
+논문의 본문에서 우리는 전적으로 SRC 스레드 설계의 관점에서 이야기했습니다. 그 설계는 다른 여러, 더 공개적으로 이용 가능한 설계들과 상당히 유사합니다. 이 부록에서는 몇 가지 다른 설계들을 SRC의 것과 비교합니다. 다른 설계들의 해당 기능들이 SRC의 것과 다른 부분에서, 그러한 차이점이 언제 그리고 어떻게 유용하거나 위험할 수 있는지에 대한 힌트를 제공하려고 노력할 것입니다.
+
+여기의 설명들은 여러분이 각 시스템에 대한 원본 문서들을 상당히 잘 알고 있다고 가정합니다. 이 부록의 어떤 내용에 의존하기 전에 반드시 해당 문서들을 직접 읽어보시기 바라며, 만약 여러분이 좋아하는 시스템을 잘못 표현한 부분이 있다면 사과드립니다.
+
+각 설계(SRC의 것 포함)에는 제가 이 논문에서 논의하지 않은 메커니즘들이 포함되어 있습니다. 예를 들어, 각 설계에는 스케줄링 결정에 영향을 미치는 기능(우선순위 조정 또는 선점(pre-emption)이 유용한 시점에 대한 힌트 제공)이 있습니다. SRC와 Sun은 스레드에 컨텍스트 정보를 연관시키는 기능을 제공합니다. 각 시스템은 뮤텍스에 대한 "조건부 잠금(conditional lock)" 연산을 제공합니다. 시간과 인내심의 한계로 여기서 이것들을 탐구할 수는 없습니다.
+
+여러분은 이 각각의 시스템(SRC 포함)이 동등하다는 점을 명심해야 합니다. 적어도 한 시스템의 기능을 다른 시스템 위에서 프로그래밍하여 재현할 수 있다는 의미에서 그렇습니다. 이들 중 어떤 시스템을 사용하든 모든 동시성 프로그래밍 문제를 해결할 수 있습니다. 차이점의 효과는 일부 프로그래밍 패러다임(좋은 것이든 나쁜 것이든)을 더 쉽게 만들고, 일부는 더 어렵게 만든다는 것뿐입니다.
+
+다음 표는 주요 SRC 기능과 Apollo [2], Sun [14,15], MACH [1,6,16]의 기능 간의 대략적인 동등성을 요약합니다. 항목이 없는 것은 제가 읽은 문서에서 합리적으로 동등한 기능을 찾을 수 없음을 의미합니다. 다음 절들에서는 이러한 기능들이 SRC의 것과 어떻게 다른지 논의합니다.
+
+| SRC | Apollo Domain CPS | Sun release 4.0 | MACH C threads |
+|-----|------------------|-----------------|----------------|
+| Fork | task_create | lwp_create | cthread_fork |
+| Join | task_join | (없음) | cthread_join |
+| Mutex | task_handle_t | mutex_t | mutex_t |
+| LOCK ... END | mutex_lock / mutex_unlock | mutex_enter / mutex_exit | mutex_lock / mutex_unlock |
+| Condition | ec2_eventcount_t | cv_t | condition_t |
+| Wait | ec2_wait | cv_wait | condition_wait |
+| Broadcast | ec2_advance | cv_broadcast | condition_broadcast |
+| Signal | (없음) | cv_notify | condition_signal |
+| Alert | task_signal | (없음) | (없음) |
+
+================================================================================
+
+===== Page 36 (원문) =====
+
+1
+
+## Apollo Domain Concurrent Programming Support (CPS)
+
+Apollo allows you to specify a timeout with calls of "mutex_lock". There seem to be two reasons why you might want to do this. First, your program might have some alternative algorithm it could use if the required mutex is being held too long. This is a technique that would be useful if lock conflicts are common. Generally, you should arrange that lock conflicts are quite rare and of short duration. You can do this by arranging your locking to be fine enough grain, each mutex protecting only the data you actually intend to touch. But if you cannot achieve this, then you might find the timeout parameter useful. Second, you can use this timeout parameter for detecting (and even recovering from) deadlocks. This I discourage—I view deadlocks as bugs; you should detect them with a debugger and re- program to avoid them.
+
+Apollo's level 2 eventcounts serve the same purpose as SRC's condition variables. The simplest usage of "ec2_advance" is for a thread to lock a mutex, inspect some data, and decide that it needs to block until the data is changed by some other thread. It does so by reading the value of the eventcount (with "ec2_read"), unlocking the mutex, and then calling "ec2_wait" to block until the eventcount is advanced. This has the same effect as SRC's use of "Wait" and "Broadcast". Reading the value of the eventcount while the mutex is still locked achieves the same atomicity as SRC guarantees in the "Wait" call. (Indeed, this is how SRC implements that atomicity.) Apollo has no equivalent of SRC's "Signal" operation.
+
+Apollo's eventcounts provide additional freedom, since they are not explicitly tied to a mutex or its associated data. This allows threads to block and wake up without synchronizing over shared data. This is rarely what you want to do. Almost always, the reason you know that it is profitable to awaken a thread is because you have just changed some data that thread is interested in. If you take advantage of this extra flexibility, you must be careful to prevent errors such as the following sequence of actions.
+
+1 Thread A looks at the data and decides to block;
+2 Thread A unlocks the mutex;
+3 Thread B locks the mutex and changes the data;
+4 Thread B calls "ec2_advance";
+5 Thread A calls "ec2_read";
+6 Thread A calls "ec2_wait".
+
+With this sequence thread A will not be awoken, even although the data it is wanting has changed. The intended sequence was that step (5) should happen before step (4). To guarantee this, thread A must execute (5) before (2).
+
+Apollo allows you to wait on multiple eventcounts when you call "ec2_wait". This is occasionally convenient. Without this feature, you must have one thread for each condition for which you are waiting. The extra functionality of the Apollo design does not seem to introduce any new problems. The only down- side is additional complexity, and scope for performance penalties, in the threads implementation.
+
+Apollo's asynchronous fault facility provided by "task_signal" substitutes for SRC's facility for alerting a thread. The SRC design provides only for the target thread to poll for alerts (by calling "AlertWait" or "TestAlert"); the Apollo design produces a fault at an arbitrary point in the target thread's execution, provided the thread has not inhibited faults. It is important that you don't interrupt a thread while is is executing with a mutex locked, since that would leave the shared data in an unpredictable state. Apollo enforces this restriction by inhibiting faults while a mutex is locked. The attraction of the polling model is that the flow of control of your program is more clearly visible in the source. The attraction of interrupting at an arbitrary point (outside of LOCK clauses) is that it is easier to be sure that computations can be terminated—there is less likelihood that you will introduce a bug by forgetting to call "TestAlert". These attractions are both valid, and the ideal design would allow for both.
+
+===== Page 36 (번역) =====
+
+1
+
+## 아폴로 도메인 동시 프로그래밍 지원 (Apollo Domain Concurrent Programming Support, CPS)
+
+Apollo는 "mutex_lock" 호출과 함께 타임아웃(timeout)을 지정할 수 있게 합니다. 이를 원할 수 있는 두 가지 이유가 있는 것 같습니다. 첫째, 프로그램에 필요한 뮤텍스가 너무 오래 보유되고 있는 경우 사용할 수 있는 대체 알고리즘이 있을 수 있습니다. 이는 잠금 충돌(lock conflicts)이 흔한 경우 유용한 기법입니다. 일반적으로 잠금 충돌이 매우 드물고 지속 시간이 짧도록 구성해야 합니다. 이는 각 뮤텍스가 실제로 건드릴 데이터만 보호하도록 잠금 입도를 충분히 세밀하게(fine enough grain) 구성함으로써 달성할 수 있습니다. 그러나 이를 달성할 수 없다면 타임아웃 매개변수가 유용할 수 있습니다. 둘째, 이 타임아웃 매개변수를 교착 상태(deadlock) 감지(및 복구에도) 사용할 수 있습니다. 저는 이를 권장하지 않습니다. 저는 교착 상태를 버그로 봅니다. 디버거로 감지하고 피하도록 다시 프로그래밍해야 합니다.
+
+Apollo의 레벨 2 이벤트카운트(eventcount)는 SRC의 조건 변수와 동일한 목적을 수행합니다. "ec2_advance"의 가장 간단한 용도는 스레드가 뮤텍스를 잠그고, 일부 데이터를 검사한 후, 다른 스레드에 의해 데이터가 변경될 때까지 블록해야 한다고 결정하는 것입니다. 이를 위해 이벤트카운트 값을 읽고("ec2_read"), 뮤텍스를 잠금 해제한 다음, 이벤트카운트가 advance될 때까지 블록하기 위해 "ec2_wait"을 호출합니다. 이는 SRC의 "Wait" 및 "Broadcast" 사용과 동일한 효과를 가집니다. 뮤텍스가 여전히 잠겨 있는 동안 이벤트카운트 값을 읽는 것은 SRC가 "Wait" 호출에서 보장하는 것과 동일한 원자성(atomicity)을 달성합니다. (실제로 SRC가 그 원자성을 구현하는 방식입니다.) Apollo에는 SRC의 "Signal" 연산에 해당하는 기능이 없습니다.
+
+Apollo의 이벤트카운트는 뮤텍스나 그 연관 데이터에 명시적으로 묶이지 않기 때문에 추가적인 자유도를 제공합니다. 이는 스레드가 공유 데이터에 대해 동기화하지 않고 블록하고 깨어날 수 있게 합니다. 이것은 여러분이 실제로 원하는 경우가 거의 없습니다. 거의 항상, 스레드를 깨우는 것이 유익하다는 것을 아는 이유는 해당 스레드가 관심 있어 하는 데이터를 방금 변경했기 때문입니다. 이 추가적인 유연성을 활용하려면 다음과 같은 동작 순서의 오류를 방지하도록 주의해야 합니다.
+
+1 스레드 A가 데이터를 보고 블록하기로 결정;
+2 스레드 A가 뮤텍스를 잠금 해제;
+3 스레드 B가 뮤텍스를 잠그고 데이터 변경;
+4 스레드 B가 "ec2_advance" 호출;
+5 스레드 A가 "ec2_read" 호출;
+6 스레드 A가 "ec2_wait" 호출.
+
+이 순서에서 스레드 A가 원하는 데이터가 변경되었음에도 불구하고 깨어나지 않을 것입니다. 의도된 순서는 (5)번 단계가 (4)번 단계 전에 일어나는 것이었습니다. 이를 보장하려면, 스레드 A는 (2)번 단계 전에 (5)번 단계를 실행해야 합니다.
+
+Apollo는 "ec2_wait" 호출 시 여러 이벤트카운트에서 대기할 수 있게 합니다. 이것은 때때로 편리합니다. 이 기능이 없으면, 대기하는 각 조건마다 하나의 스레드가 있어야 합니다. Apollo 설계의 추가 기능은 새로운 문제를 도입하지 않는 것으로 보입니다. 유일한 단점은 스레드 구현에 추가적인 복잡성과 성능 저하의 여지가 있다는 것입니다.
+
+"task_signal"이 제공하는 Apollo의 비동기 폴트(asynchronous fault) 기능은 SRC의 스레드 알림(alert) 기능을 대체합니다. SRC 설계는 대상 스레드가 알림을 폴링(poll)하도록만 합니다("AlertWait" 또는 "TestAlert" 호출). Apollo 설계는 대상 스레드가 폴트를 금지하지 않은 경우, 대상 스레드 실행 중 임의의 지점에서 폴트를 발생시킵니다. 뮤텍스를 잠근 상태에서 실행 중인 스레드를 인터럽트하는 것은 공유 데이터를 예측 불가능한 상태로 남겨두므로 중요하게 피해야 합니다. Apollo는 뮤텍스가 잠겨 있는 동안 폴트를 금지함으로써 이 제한을 강제합니다. 폴링 모델(polling model)의 장점은 프로그램의 제어 흐름이 소스 코드에서 더 명확하게 보인다는 것입니다. (LOCK 절 외부의) 임의의 지점에서 인터럽트하는 것의 장점은 계산이 종료될 수 있다는 확신을 갖기가 더 쉽다는 것입니다. "TestAlert" 호출을 잊어버려 버그를 도입할 가능성이 줄어듭니다. 이러한 장점들은 모두 타당하며, 이상적인 설계는 둘 다 허용할 것입니다.
+
+================================================================================
+
+===== Page 37 (원문) =====
+
+3
+
+## Sun's lightweight process library
+
+Sun's version 4.0 offers "lightweight processes" as a library [14,15]. These are not true threads—within an address space only one lightweight processes is executing at any time. But the creation and synchronization facilities are the same as you would expect them to be for real threads.
+
+Sun allows a thread to lock a mutex recursively. In other words, while a thread is holding a mutex it can call a procedure (perhaps by recursion) that locks the same mutex. In the SRC design this would deadlock. Which is preferable depends on your intent. If you were careful to restore the monitor invariant before making the call that recursively locks the mutex, all will be fine. But if this is really a bug, because you forgot that the called procedure uses the same data, you will get the wrong answer. Additionally, if you take advantage of this feature remember that you can introduce a deadlock if you split a computation into multiple threads—what used to be a recursive acquisition of the mutex might become an acquisition by a different thread.
+
+Sun does not provide any mechanism for alerting a thread. However, they do provide a mechanism for threads to deal with asynchronous Unix signals by calling "sig_create". Some of these signals serve the same purpose as SRC's alerts, and so these cases are easy to deal with. But remember that alerts are not really a fundamental part of threads—they are just an added convenience.
+
+The library also includes a facility for passing messages between threads. Most designers have adopted the view that message passing is an alternative to shared memory synchronization, not an adjunct to it. I don't recommend using both mechanisms within a single program, except to the extent that you need to use Sun's message system to handle asynchronous Unix signals.
+
+## Threads in Mach
+
+The procedures I listed in the table come from Eric Cooper's C library interface to MACH threads [6]. That interface is quite similar to SRC's. The only noticeable omission is any facility for alerting a thread. There are no substantive differences.
+
+===== Page 37 (번역) =====
+
+3
+
+## Sun의 경량 프로세스 라이브러리 (Sun's lightweight process library)
+
+Sun 버전 4.0은 라이브러리 형태로 "경량 프로세스(lightweight process)"를 제공합니다 [14,15]. 이것들은 진정한 스레드는 아닙니다. 주소 공간 내에서 한 번에 오직 하나의 경량 프로세스만 실행됩니다. 그러나 생성 및 동기화 기능은 진짜 스레드에 대해 기대하는 것과 동일합니다.
+
+Sun은 스레드가 뮤텍스를 재귀적으로(recursively) 잠그는 것을 허용합니다. 즉, 스레드가 뮤텍스를 보유하고 있는 동안, 동일한 뮤텍스를 잠그는 프로시저를 (아마도 재귀적으로) 호출할 수 있습니다. SRC 설계에서는 이것이 교착 상태를 일으킵니다. 어느 것이 더 나은지는 의도에 따라 다릅니다. 뮤텍스를 재귀적으로 잠그는 호출을 하기 전에 모니터 불변 조건(monitor invariant)을 복원하도록 주의했다면, 모든 것이 괜찮을 것입니다. 그러나 호출된 프로시저가 동일한 데이터를 사용한다는 사실을 잊어버려서 이것이 실제로 버그라면, 잘못된 답을 얻을 것입니다. 추가적으로, 이 기능을 활용하는 경우 계산을 여러 스레드로 분할하면 교착 상태를 도입할 수 있다는 점을 기억하세요. 예전에 뮤텍스의 재귀적 획득이었던 것이 다른 스레드에 의한 획득이 될 수 있습니다.
+
+Sun은 스레드에 알림(alert)을 보내는 메커니즘을 제공하지 않습니다. 그러나 스레드가 "sig_create"를 호출하여 비동기 Unix 시그널을 처리하는 메커니즘을 제공합니다. 이러한 시그널 중 일부는 SRC의 알림과 동일한 목적을 수행하므로, 이러한 경우는 처리하기 쉽습니다. 그러나 알림이 실제로 스레드의 근본적인 부분이 아니라는 점을 기억하세요. 이는 단지 추가된 편의 사항일 뿐입니다.
+
+라이브러리는 또한 스레드 간 메시지 전달(message passing) 기능을 포함합니다. 대부분의 설계자들은 메시지 전달이 공유 메모리 동기화의 대안이지, 그에 대한 부속물이 아니라는 관점을 채택했습니다. 비동기 Unix 시그널을 처리하기 위해 Sun의 메시지 시스템을 사용해야 하는 경우를 제외하고는, 단일 프로그램 내에서 두 메커니즘을 모두 사용하는 것을 권장하지 않습니다.
+
+## Mach의 스레드 (Threads in Mach)
+
+제가 표에 나열한 프로시저들은 Eric Cooper의 MACH 스레드용 C 라이브러리 인터페이스에서 가져온 것입니다 [6]. 그 인터페이스는 SRC의 인터페이스와 상당히 유사합니다. 눈에 띄는 유일한 누락은 스레드에 알림을 보내는 기능입니다. 실질적인 차이는 없습니다.
+
+================================================================================

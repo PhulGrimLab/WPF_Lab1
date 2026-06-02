@@ -1,0 +1,69 @@
+================================================================================
+파일명: Chapter10_CONCLUDING_REMARKS_REFERENCES_번역.txt
+================================================================================
+
+===== Page 33 (원문) =====
+
+## CONCLUDING REMARKS
+
+Writing concurrent programs has a reputation for being exotic and difficult. I believe it is neither. You need a system that provides you with good primitives and suitable libraries, you need a basic caution and carefulness, you need an armory of useful techniques, and you need to know of the common pitfalls. I hope that this paper has helped you towards sharing my belief.
+
+Butler Lampson, Mike Schroeder, Bob Stewart and Bob Taylor caused me to write this paper. If you found it useful, thank them.
+
+## REFERENCES
+
+1. ACCETTA, M. et al. Mach: a new kernel foundation for UNIX development. In Proceedings of the Summer 1986 USENIX Conference (July 1986), 93-112.
+2. Apollo Computer Inc. Concurrent Programming Support (CPS) Reference. Order No. 010233, June 1987.
+3. BIRRELL, A., AND NELSON, B. Implementing remote procedure calls. ACM Trans. Comput. Syst. 2, 1 (Feb. 1984), 39-59.
+4. BIRRELL, A., GUTTAG, J., HORNING, J. AND LEVIN, R. Synchronization primitives for a multiprocessor: a formal specification. In Proceedings of the 11th Symposium on Operating System Principles (Nov. 1987), 94-102.
+5. CLARK, D. The structuring of systems using up-calls. In Proceedings of the 10th Symposium on Operating System Principles (Dec. 1985), 171-180.
+6. COOPER, E. AND DRAVES, R. C Threads. Technical report CMU-CS-88-154, Carnegie Mellon University. Computer Science Department, Pittsburgh, PA (June 1988).
+7. GUTTAG, J., HORNING, J. AND WING, J. The Larch family of specification languages. IEEE Software 2, 5 (SEP. 1985), 24-36.
+8. HADDON, B. Nested monitor calls. Operating Systems Review 11, 4 (Oct. 1977), 18-23.
+9. HOARE, C.A.R. Monitors: An operating system structuring concept. Commun. ACM 17, 10 (Oct.1974), 549-557.
+
+===== Page 33 (번역) =====
+
+## 맺음말 (CONCLUDING REMARKS)
+
+동시적 프로그램을 작성하는 것은 이국적이고 어렵다는 평판이 있습니다. 저는 그것이 어느 쪽도 아니라고 생각합니다. 여러분에게 좋은 기본 연산(primitive)과 적합한 라이브러리를 제공하는 시스템, 기본적인 주의와 신중함, 유용한 기법들의 무기고, 그리고 흔한 함정들에 대한 지식이 필요합니다. 이 논문이 여러분이 제 믿음을 공유하는 데 도움이 되었기를 바랍니다.
+
+Butler Lampson, Mike Schroeder, Bob Stewart, Bob Taylor가 이 논문을 쓰게 만들었습니다. 유용하게 보셨다면, 그들에게 감사하세요.
+
+## 참고문헌 (REFERENCES)
+
+1. ACCETTA, M. 외. "Mach: a new kernel foundation for UNIX development." In Proceedings of the Summer 1986 USENIX Conference (1986년 7월), 93-112.
+2. Apollo Computer Inc. "Concurrent Programming Support (CPS) Reference." 주문 번호 010233, 1987년 6월.
+3. BIRRELL, A., AND NELSON, B. "Implementing remote procedure calls." ACM Trans. Comput. Syst. 2, 1 (1984년 2월), 39-59.
+4. BIRRELL, A., GUTTAG, J., HORNING, J. AND LEVIN, R. "Synchronization primitives for a multiprocessor: a formal specification." In Proceedings of the 11th Symposium on Operating System Principles (1987년 11월), 94-102.
+5. CLARK, D. "The structuring of systems using up-calls." In Proceedings of the 10th Symposium on Operating System Principles (1985년 12월), 171-180.
+6. COOPER, E. AND DRAVES, R. "C Threads." Technical report CMU-CS-88-154, Carnegie Mellon University. Computer Science Department, Pittsburgh, PA (1988년 6월).
+7. GUTTAG, J., HORNING, J. AND WING, J. "The Larch family of specification languages." IEEE Software 2, 5 (1985년 9월), 24-36.
+8. HADDON, B. "Nested monitor calls." Operating Systems Review 11, 4 (1977년 10월), 18-23.
+9. HOARE, C.A.R. "Monitors: An operating system structuring concept." Commun. ACM 17, 10 (1974년 10월), 549-557.
+
+================================================================================
+
+===== Page 34 (원문) =====
+
+10. LAMPSON, B AND REDELL, D. Experience with processes and monitors in Mesa. Commun. ACM 23, 2 (Feb.1980), 105-117.
+11. MCJONES, P AND SWART, G. Evolving the UNIX system interface to support multi-threaded programs. In Proceedings of the Winter 1989 USENIX Conference (Feb. 1989).
+12. ROVNER, P. Extending Modula-2 to build large, integrated systems. IEEE Software 3, 6 (Nov. 1986), 46-57.
+13. SALTZER, J. Traffic control in a multiplexed computer system. Th., MAC-TR-30, MIT, Cambridge, Mass., July 1966.
+14. Sun Microsystems Inc. Sun OS 4.0 Reference Manual, Nov. 1987, section 3L.
+15. Sun Microsystems Inc. System Services Overview, May 1988, chapter 6.
+16. TEVANIAN, A. et al Mach threads and the Unix kernel: the battle for control. In Proceedings of the Summer 1987 USENIX Conference (June 1987), 185-197.
+17. VANDEVOORDE, M. AND ROBERTS, E. Workcrews: an abstraction for controlling parallelism. (Submitted for publication; copies available from Eric Roberts at SRC).
+
+===== Page 34 (번역) =====
+
+10. LAMPSON, B AND REDELL, D. "Experience with processes and monitors in Mesa." Commun. ACM 23, 2 (1980년 2월), 105-117.
+11. MCJONES, P AND SWART, G. "Evolving the UNIX system interface to support multi-threaded programs." In Proceedings of the Winter 1989 USENIX Conference (1989년 2월).
+12. ROVNER, P. "Extending Modula-2 to build large, integrated systems." IEEE Software 3, 6 (1986년 11월), 46-57.
+13. SALTZER, J. "Traffic control in a multiplexed computer system." Th., MAC-TR-30, MIT, Cambridge, Mass., 1966년 7월.
+14. Sun Microsystems Inc. "Sun OS 4.0 Reference Manual," 1987년 11월, section 3L.
+15. Sun Microsystems Inc. "System Services Overview," 1988년 5월, chapter 6.
+16. TEVANIAN, A. 외. "Mach threads and the Unix kernel: the battle for control." In Proceedings of the Summer 1987 USENIX Conference (1987년 6월), 185-197.
+17. VANDEVOORDE, M. AND ROBERTS, E. "Workcrews: an abstraction for controlling parallelism." (출판 제출됨; SRC의 Eric Roberts에게 요청하여 사본 획득 가능).
+
+================================================================================

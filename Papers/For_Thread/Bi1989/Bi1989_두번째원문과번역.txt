@@ -1,0 +1,259 @@
+================================================================================
+파일명: Chapter2_3_WHY_USE_CONCURRENCY_DESIGN_번역.txt
+================================================================================
+
+===== Page 7 (원문) =====
+
+3
+
+Sometimes you can deliberately add concurrency to your program in order to reduce the latency of operations (the elapsed time between calling a procedure and the procedure returning). Often, some of the work incurred by a procedure can be deferred, since it does not affect the result of the procedure. For example, when you add or remove something in a balanced tree you could happily return to the caller before re- balancing the tree. With threads you can achieve this easily: do the re- balancing in a separate thread. If the separate thread is scheduled at a lower priority, then the work can be done at a time when you are less busy (for example, when waiting for user input). Adding threads to defer work is a powerful technique, even on a uni- processor. Even if the same total work is done, reducing latency can improve the responsiveness of your program.
+
+## THE DESIGN OF A THREAD FACILITY
+
+We can't discuss how to program with threads until we agree on the primitives provided by a multi- threading facility. The various systems that support threads offer quite similar facilities, but there is a lot of diversity in the details. In general, there are four major mechanisms: thread creation, mutual exclusion, waiting for events, and some arrangement for getting a thread out of an unwanted long- term wait. The discussions in the rest of the paper are organized around the particular primitives provided by the SRC thread facility [4], and I describe here their detailed semantics. In the appendix I describe the corresponding parts of the thread facilities provided by some other systems, and how they relate to the SRC facilities.
+
+===== Page 7 (번역) =====
+
+3
+
+때로는 작업의 지연 시간(latency) (프로시저를 호출하고 반환될 때까지 경과된 시간)을 줄이기 위해 의도적으로 프로그램에 동시성을 추가할 수 있습니다. 종종 프로시저가 수행하는 작업 중 일부는 결과에 영향을 미치지 않으므로 지연시킬 수 있습니다. 예를 들어, 균형 트리(balanced tree)에 무언가를 추가하거나 제거할 때, 트리의 재균형을 맞추기 전에 호출자에게 반환할 수 있습니다. 스레드를 사용하면 이를 쉽게 달성할 수 있습니다: 재균형 작업을 별도의 스레드에서 수행하면 됩니다. 별도 스레드의 우선순위를 낮게 설정하면, 작업은 덜 바쁜 시간(예: 사용자 입력을 기다릴 때)에 수행될 수 있습니다. 작업을 지연시키기 위해 스레드를 추가하는 것은 단일 프로세서(uni-processor)에서도 강력한 기법입니다. 동일한 총 작업량이 수행되더라도 지연 시간을 줄이면 프로그램의 응답성을 향상시킬 수 있습니다.
+
+## 스레드 기능의 설계 (THE DESIGN OF A THREAD FACILITY)
+
+멀티스레딩 기능이 제공하는 기본 연산(primitive)들에 대해 동의하지 않고서는 스레드 프로그래밍 방법을 논의할 수 없습니다. 스레드를 지원하는 다양한 시스템들은 상당히 유사한 기능들을 제공하지만, 세부 사항에는 많은 차이가 있습니다. 일반적으로 네 가지 주요 메커니즘이 있습니다: 스레드 생성, 상호 배제(mutual exclusion), 이벤트 대기, 그리고 원치 않는 장기 대기로부터 스레드를 빼내는 방법. 논문의 나머지 부분에서의 논의는 SRC 스레드 기능 [4]이 제공하는 특정 기본 연산들을 중심으로 구성되며, 여기서는 그 상세한 의미론을 설명합니다. 부록에서는 다른 일부 시스템에서 제공하는 스레드 기능의 해당 부분과 그것이 SRC 기능과 어떻게 관련되는지 설명합니다.
+
+================================================================================
+
+===== Page 7 (원문 하단) - Thread creation =====
+
+## Thread creation
+
+A thread is created by calling "Fork", giving it a procedure and an argument record. The effect of "Fork" is to create a new thread, and start that thread executing asynchronously at an invocation of the given procedure with the given arguments. When the procedure returns, the thread dies. Usually, "Fork" returns to its caller a handle on the newly created thread. The handle can be presented to a "Join" procedure. "Join" waits for the given thread to terminate, and returns the result of the given thread's initial procedure. The SRC thread creation facilities are as follows.2
+
+TYPE Thread;
+TYPE Forkee ≡ PROCEDURE(REFANY):REFANY;
+PROCEDURE Fork(proc: Forkee; arg: REFANY): Thread;
+PROCEDURE Join(thread: Thread): REFANY;
+
+As a simple example of their use, the following program fragment executes the procedure calls "a(x)" and "b(y)" in parallel, and assigns the result of calling "a(x)" to the variable "q".
+
+===== Page 7 (번역 하단) - 스레드 생성 =====
+
+## 스레드 생성 (Thread creation)
+
+스레드는 "Fork"를 호출하여 생성되며, 여기에 프로시저와 인자 레코드(argument record)를 전달합니다. "Fork"의 효과는 새로운 스레드를 생성하고, 주어진 인자들로 주어진 프로시저를 호출하여 해당 스레드가 비동기적으로 실행을 시작하도록 하는 것입니다. 프로시저가 반환되면 스레드는 종료됩니다. 일반적으로 "Fork"는 새로 생성된 스레드에 대한 핸들(handle)을 호출자에게 반환합니다. 이 핸들은 "Join" 프로시저에 전달될 수 있습니다. "Join"은 주어진 스레드가 종료될 때까지 기다렸다가, 해당 스레드의 초기 프로시저 실행 결과를 반환합니다. SRC의 스레드 생성 기능은 다음과 같습니다.2
+
+TYPE Thread;
+TYPE Forkee ≡ PROCEDURE(REFANY):REFANY;
+PROCEDURE Fork(proc: Forkee; arg: REFANY): Thread;
+PROCEDURE Join(thread: Thread): REFANY;
+
+사용법에 대한 간단한 예로, 다음 프로그램 조각은 프로시저 호출 "a(x)"와 "b(y)"를 병렬로 실행하고, "a(x)" 호출의 결과를 변수 "q"에 할당합니다.
+
+================================================================================
+
+===== Page 8 (원문) =====
+
+4 - An Introduction to Programming with Threads
+
+VAR t: Thread;
+t := Fork(a, x);
+p := b(y);
+q := Join(t);
+
+In practice, "Join" is not called very much at SRC, and some other thread facilities do not provide "Join" as a primitive. Most forked threads are permanent daemon threads, or have no results, or communicate their results by some synchronization arrangement other than "Join". If a thread's initial procedure has returned and there is no subsequent call of "Join", the thread quietly evaporates.
+
+## Mutual exclusion
+
+The simplest way that threads interact is through access to shared memory. In a high- level language, this is usually expressed as access to global variables. Since threads are running in parallel, the programmer must explicitly arrange to avoid errors arising when more than one thread is accessing the shared variables. The simplest tool for doing this is a primitive that offers mutual exclusion (sometimes called critical sections), specifying for a particular region of code that only one thread can execute there at any time. In the SRC design, this is achieved with the data type "Mutex" and the language's "LOCK" construct.
+
+TYPE Mutex;
+LOCK mutex DO ... statements ... END;
+
+A mutex has two states: locked and unlocked, initially unlocked. The LOCK clause locks the mutex, then executes the contained statements, then unlocks the mutex. A thread executing inside the LOCK clause is said to "hold" the mutex. If another thread attempts to lock the mutex when it is already locked, the second thread blocks (enqueued on the mutex) until the mutex is unlocked.
+
+The programmer can achieve mutual exclusion on a set of variables by associating them with a mutex, and accessing the variables only from a thread that holds the mutex (i.e., from a thread executing inside a LOCK clause that has locked the mutex). This is the basis of the notion of monitors, first described by Tony Hoare [9]. For example, in the following fragment the mutex "m" is associated with the global variable "head"; the LOCK clause provides mutual exclusion for adding the local variable "newElement" to a linked list whose head is "head".
+
+TYPE List = REF RECORD ch: CHAR; next: List END;
+VAR m: Thread.Mutex;
+VAR head: List;
+
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+END;
+
+The simplest sort of mutex is a global variable (as in the fragment above); in this case at most one thread is executing inside the LOCK clause at any instant.
+
+===== Page 8 (번역) =====
+
+4 - An Introduction to Programming with Threads
+
+VAR t: Thread;
+t := Fork(a, x);
+p := b(y);
+q := Join(t);
+
+실제로 SRC에서는 "Join"이 자주 호출되지 않으며, 다른 일부 스레드 기능들은 "Join"을 기본 연산으로 제공하지 않습니다. 포크된 대부분의 스레드는 영구적인 데몬 스레드(daemon thread)이거나, 결과가 없거나, "Join" 이외의 다른 동기화 방식을 통해 결과를 전달합니다. 스레드의 초기 프로시저가 반환되었는데 이후 "Join" 호출이 없으면, 해당 스레드는 조용히 사라집니다.
+
+## 상호 배제 (Mutual exclusion)
+
+스레드가 상호작용하는 가장 간단한 방법은 공유 메모리에 대한 접근을 통해서입니다. 고수준 언어에서 이는 일반적으로 전역 변수에 대한 접근으로 표현됩니다. 스레드들이 병렬로 실행되기 때문에, 프로그래머는 여러 스레드가 공유 변수에 접근할 때 발생할 수 있는 오류를 피하기 위해 명시적으로 조치를 취해야 합니다. 이를 위한 가장 간단한 도구는 상호 배제(mutual exclusion, 때로는 임계 구역(critical section)이라고 함)를 제공하는 기본 연산으로, 특정 코드 영역에는 한 번에 오직 하나의 스레드만 실행할 수 있도록 지정합니다. SRC 설계에서는 데이터 타입 "Mutex"와 언어의 "LOCK" 구성을 통해 이를 달성합니다.
+
+TYPE Mutex;
+LOCK mutex DO ... statements ... END;
+
+뮤텍스(Mutex)는 잠김(locked)과 잠기지 않음(unlocked)의 두 가지 상태를 가지며, 초기 상태는 잠기지 않음입니다. LOCK 절은 뮤텍스를 잠그고, 포함된 문장들을 실행한 다음, 뮤텍스의 잠금을 해제합니다. LOCK 절 내부에서 실행 중인 스레드는 뮤텍스를 "보유하고(hold)" 있다고 말합니다. 다른 스레드가 이미 잠겨 있는 뮤텍스를 잠그려고 시도하면, 두 번째 스레드는 해당 뮤텍스가 잠금 해제될 때까지 블록(block)됩니다 (뮤텍스의 대기 큐에 enqueue됨).
+
+프로그래머는 변수 집합을 뮤텍스와 연관시키고, 뮤텍스를 보유한 스레드(즉, 해당 뮤텍스를 잠근 LOCK 절 내에서 실행 중인 스레드)만 해당 변수에 접근함으로써 상호 배제를 달성할 수 있습니다. 이는 Tony Hoare [9]가 처음 기술한 모니터(monitor) 개념의 기초가 됩니다. 예를 들어, 다음 조각에서 뮤텍스 "m"은 전역 변수 "head"와 연관되어 있습니다. LOCK 절은 지역 변수 "newElement"를 헤드가 "head"인 연결 리스트에 추가하는 작업에 대한 상호 배제를 제공합니다.
+
+TYPE List = REF RECORD ch: CHAR; next: List END;
+VAR m: Thread.Mutex;
+VAR head: List;
+
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+END;
+
+가장 단순한 형태의 뮤텍스는 전역 변수입니다 (위의 조각처럼). 이 경우 어느 순간에든 최대 하나의 스레드만 LOCK 절 내부에서 실행 중입니다.
+
+================================================================================
+
+===== Page 8 (원문 하단) - Condition variables =====
+
+But a mutex might instead be part of a data structure (for example a field of a record). In that case, the variables it protects would also be part of the data structure (for example, the remaining fields of the same record). To express this, the LOCK clause would begin with an expression selecting the mutex field of the record, and the correct description would be that at most one thread can execute with the mutex held. This latter feature is typically used to arrange that at most one thread can access the fields of a particular record, but multiple threads can access different records in parallel. We will examine this usage in more detail in a later section.
+
+## Condition variables
+
+You can view a mutex as a simple kind of resource scheduling mechanism. The resource being scheduled is the shared memory accessed inside the LOCK clause, and the scheduling policy is one thread at a time. But often the programmer needs to express more complicated scheduling policies. This requires use of a mechanism that allows a thread to block until some event happens. In the SRC design, this is achieved with a condition variable.
+
+TYPE Condition;
+PROCEDURE Wait(m: Mutex; c: Condition);
+PROCEDURE Signal(c: Condition);
+PROCEDURE Broadcast(c: Condition);
+
+A condition variable is always associated with a particular mutex, and with the data protected by that mutex. In general a monitor consists of some data, a mutex, and zero or more condition variables. Notice that a particular condition variable is always used in conjunction with the same mutex and its data. The "Wait" operation atomically unlocks the mutex and blocks the thread (enqueued on the condition variable). The "Signal" operation does nothing unless there is a thread blocked on the condition variable, in which case it awakens at least one such blocked thread (but possibly more than one). The "Broadcast" operation is like "Signal", except that it awakens all the threads currently blocked on the condition variable. When a thread is awoken inside "Wait" after blocking, it re- locks the mutex, then returns. Note that the mutex might not be available, in which case the thread will block on the mutex until it is available.
+
+The mutex associated with a condition variable protects the shared data that is used for the scheduling decision. If a thread wants the resource, it locks the mutex and examines the shared data. If the resource is available, the thread continues. If not, the thread unlocks the mutex and blocks, by calling "Wait". Later, when some other thread makes the resource available it awakens the first thread by calling "Signal" or "Broadcast". For example, the following fragment allows a thread to block until a linked list (whose head is "head") is not empty, then remove the top element of the list.
+
+VAR nonEmpty: Thread.Condition;
+
+===== Page 8 (번역 하단) - 조건 변수 =====
+
+그러나 뮤텍스는 데이터 구조의 일부(예: 레코드의 필드)일 수도 있습니다. 그런 경우, 그것이 보호하는 변수들도 데이터 구조의 일부(예: 동일 레코드의 나머지 필드들)가 될 것입니다. 이를 표현하기 위해 LOCK 절은 레코드의 뮤텍스 필드를 선택하는 표현식으로 시작할 것이며, 올바른 설명은 뮤텍스를 보유한 상태에서 최대 하나의 스레드만 실행할 수 있다는 것입니다. 이 후자의 기능은 일반적으로 특정 레코드의 필드에는 최대 하나의 스레드만 접근할 수 있지만, 여러 스레드가 서로 다른 레코드에는 병렬로 접근할 수 있도록 하는 데 사용됩니다. 이 사용법은 뒷부분에서 더 자세히 살펴보겠습니다.
+
+## 조건 변수 (Condition variables)
+
+뮤텍스를 일종의 간단한 자원 스케줄링 메커니즘으로 볼 수 있습니다. 스케줄링되는 자원은 LOCK 절 내부에서 접근하는 공유 메모리이며, 스케줄링 정책은 한 번에 하나의 스레드입니다. 그러나 프로그래머는 종종 더 복잡한 스케줄링 정책을 표현해야 합니다. 이를 위해서는 스레드가 어떤 이벤트가 발생할 때까지 블록되도록 하는 메커니즘의 사용이 필요합니다. SRC 설계에서는 조건 변수(condition variable)를 통해 이를 달성합니다.
+
+TYPE Condition;
+PROCEDURE Wait(m: Mutex; c: Condition);
+PROCEDURE Signal(c: Condition);
+PROCEDURE Broadcast(c: Condition);
+
+조건 변수는 항상 특정 뮤텍스 및 해당 뮤텍스가 보호하는 데이터와 연관됩니다. 일반적으로 모니터(monitor)는 일부 데이터, 하나의 뮤텍스, 그리고 0개 이상의 조건 변수들로 구성됩니다. 특정 조건 변수는 항상 동일한 뮤텍스 및 그 데이터와 함께 사용된다는 점에 유의하세요. "Wait" 연산은 뮤텍스를 원자적으로(atomically) 잠금 해제하고 스레드를 블록합니다 (조건 변수의 대기 큐에 enqueue됨). "Signal" 연산은 조건 변수에 블록된 스레드가 없으면 아무 일도 하지 않으며, 블록된 스레드가 있으면 그러한 블록된 스레드 중 적어도 하나를 깨웁니다 (하지만 하나 이상일 수도 있습니다). "Broadcast" 연산은 "Signal"과 유사하지만, 현재 조건 변수에 블록된 모든 스레드를 깨운다는 점이 다릅니다. 블록 후 "Wait" 내부에서 깨어난 스레드는 뮤텍스를 다시 잠근(relock) 후 반환합니다. 뮤텍스를 사용할 수 없는 경우, 해당 스레드는 뮤텍스를 사용할 수 있을 때까지 뮤텍스에서 블록됩니다.
+
+조건 변수와 연관된 뮤텍스는 스케줄링 결정에 사용되는 공유 데이터를 보호합니다. 스레드가 자원을 원하면 뮤텍스를 잠그고 공유 데이터를 조사합니다. 자원을 사용할 수 있으면 스레드는 계속 진행합니다. 그렇지 않으면, 스레드는 "Wait"을 호출하여 뮤텍스를 잠금 해제하고 블록됩니다. 나중에 다른 스레드가 자원을 사용 가능하게 만들면, "Signal" 또는 "Broadcast"를 호출하여 첫 번째 스레드를 깨웁니다. 예를 들어, 다음 조각은 연결 리스트(헤드가 "head")가 비어 있지 않을 때까지 스레드를 블록한 후, 리스트의 맨 위 요소를 제거하도록 합니다.
+
+VAR nonEmpty: Thread.Condition;
+
+================================================================================
+
+===== Page 9 (원문) =====
+
+6 - An Introduction to Programming with Threads
+
+LOCK m DO
+WHILE head = NIL DO
+Thread.Wait(m, nonEmpty)
+END;
+topElement := head;
+head := head^.next;
+END;
+
+And the following fragment could be used by a thread adding an element to "head".
+
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+Thread.Signal(nonEmpty);
+END;
+
+## Alerts
+
+The final aspect of the SRC thread facility is a mechanism for interrupting a particular thread, causing it to back out of some long- term wait or computation.
+
+EXCEPTION Alerted;
+PROCEDURE Alert(t: Thread);
+PROCEDURE AlertWait(m: Mutex, c: Condition);
+PROCEDURE TestAlert(): BOOLEAN;
+
+The state of a thread includes a boolean known as "alert- pending", initially false. A call of "AlertWait" behaves the same as "Wait", except that if the thread's alert- pending boolean is true, then instead of blocking on c it sets alert- pending to false, re- locks m and raises the exception "Alerted". (Don't worry about the semantics of Modula- 2+ exceptions—think of them as a form of non- ignorable return code.) If you call "Alert(t)" when t is currently blocked on a condition variable inside a call of "AlertWait" then t is awoken, t re- locks the mutex m and then it raises the exception "Alerted". If you call "Alert(t)" when t is not blocked in a call of "AlertWait", all that happens is that its alert- pending boolean is set to true. The call "TestAlert" atomically tests and clears the thread's alert- pending boolean.
+
+For example, consider a "GetChar" routine, which blocks until a character is available on an interactive keyboard input stream. It seems attractive that if some other thread of the computation decides the input is no longer interesting (for example, the user clicked CANCEL with his mouse), then the thread should return from "GetChar". If you happen to know the condition variable where "GetChar" blocks waiting for characters you could just signal it, but often that condition variable is hidden under one or more layers of abstraction. In this situation, the thread interpreting the CANCEL request can achieve its goal by calling "Thread.Alert(t)", where "t" is the thread calling "GetChar". For this to work, "GetChar" must contain something like the following fragment.
+
+===== Page 9 (번역) =====
+
+6 - An Introduction to Programming with Threads
+
+LOCK m DO
+WHILE head = NIL DO
+Thread.Wait(m, nonEmpty)
+END;
+topElement := head;
+head := head^.next;
+END;
+
+그리고 다음 조각은 "head"에 요소를 추가하는 스레드에 의해 사용될 수 있습니다.
+
+LOCK m DO
+newElement^.next := head;
+head := newElement;
+Thread.Signal(nonEmpty);
+END;
+
+## 알림 (Alerts)
+
+SRC 스레드 기능의 마지막 측면은 특정 스레드를 인터럽트하여, 장기 대기나 계산으로부터 빠져나오게 하는 메커니즘입니다.
+
+EXCEPTION Alerted;
+PROCEDURE Alert(t: Thread);
+PROCEDURE AlertWait(m: Mutex, c: Condition);
+PROCEDURE TestAlert(): BOOLEAN;
+
+스레드의 상태에는 "alert-pending"이라고 알려진 불리언(boolean) 값이 포함되며, 초기값은 false입니다. "AlertWait" 호출은 "Wait"과 동일하게 동작하지만, 스레드의 alert-pending 불리언이 true인 경우, c에서 블록하는 대신 alert-pending을 false로 설정하고, m을 다시 잠근 후 예외 "Alerted"를 발생시킨다는 점이 다릅니다. (Modula-2+ 예외의 의미론에 대해 걱정하지 마세요. 무시할 수 없는 반환 코드의 한 형태로 생각하면 됩니다.) t가 현재 "AlertWait" 호출 내에서 조건 변수에 블록되어 있을 때 "Alert(t)"를 호출하면 t가 깨어나고, t는 뮤텍스 m을 다시 잠근 후 예외 "Alerted"를 발생시킵니다. t가 "AlertWait" 호출로 블록되어 있지 않을 때 "Alert(t)"를 호출하면, alert-pending 불리언이 true로 설정되는 것 외에는 아무 일도 일어나지 않습니다. "TestAlert" 호출은 스레드의 alert-pending 불리언을 원자적으로 테스트하고 지웁니다.
+
+예를 들어, 대화형 키보드 입력 스트림에서 문자가 사용 가능해질 때까지 블록되는 "GetChar" 루틴을 생각해 보겠습니다. 계산의 다른 스레드가 입력에 더 이상 흥미가 없다고 판단하면(예: 사용자가 마우스로 CANCEL을 클릭한 경우), "GetChar"에서 반환되어야 하는 것이 바람직해 보입니다. "GetChar"가 문자를 기다리며 블록되는 조건 변수를 알게 된다면 그냥 시그널(signal)을 보낼 수 있겠지만, 종종 그 조건 변수는 하나 이상의 추상화 계층 아래에 숨겨져 있습니다. 이 상황에서 CANCEL 요청을 해석하는 스레드는 "Thread.Alert(t)"를 호출하여 목표를 달성할 수 있습니다. 여기서 "t"는 "GetChar"를 호출하는 스레드입니다. 이것이 작동하려면 "GetChar"는 다음과 같은 조각을 포함해야 합니다.
+
+================================================================================
+
+===== Page 10 (원문) =====
+
+TRY
+WHILE empty DO
+Thread.AlertWait(m, nonEmpty)
+END;
+RETURN NextChar()
+EXCEPT
+Thread.Alerted:
+RETURN EndOfFile
+END;
+
+Alerts are complicated, and their use produces complicated programs. We will discuss them in more detail later.
+
+===== Page 10 (번역) =====
+
+TRY
+WHILE empty DO
+Thread.AlertWait(m, nonEmpty)
+END;
+RETURN NextChar()
+EXCEPT
+Thread.Alerted:
+RETURN EndOfFile
+END;
+
+알림(Alert)은 복잡하며, 그 사용은 복잡한 프로그램을 만들어냅니다. 이에 대해서는 나중에 더 자세히 논의하겠습니다.
+
+================================================================================
