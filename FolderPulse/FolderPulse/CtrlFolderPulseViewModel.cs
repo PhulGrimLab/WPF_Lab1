@@ -248,8 +248,8 @@ namespace FolderPulse
                 return;
             }
 
-            int createdFileCount = current.Files.Count(path => !previous.Files.Contains(path));
-            int deletedFileCount = previous.Files.Count(path => !current.Files.Contains(path));
+            int createdFileCount = current.Files.Keys.Count(path => !previous.Files.ContainsKey(path));
+            int deletedFileCount = previous.Files.Keys.Count(path => !current.Files.ContainsKey(path));
 
             int changedFileCount = current.Files.Count(pair => 
             {
