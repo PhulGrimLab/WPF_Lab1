@@ -21,11 +21,13 @@ namespace FolderPulse
             public DateTime LastWriteTimeUtc { get; init; }
         }
 
-        // 중앙 타이머 - 설정한 인터벌에 맞춰서 UI 갱신을 주로 수행함.
-        private readonly TimeSpan _pollInterval;
+        private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(1);
+
+        // 중앙 타이머 - 설정한 인터벌에 맞춰서 폴더 상태 체크를 수행함.
+        private TimeSpan _pollInterval;
         private CancellationTokenSource? _cts = new CancellationTokenSource();
 
-        private double _interval = 1;
+        private int _remainingSeconds = 1;
 
         private bool _disposed = false;
 
@@ -53,6 +55,52 @@ namespace FolderPulse
         {
             get => _tb_MonitoringInterval;
             set => SetProperty(ref _tb_MonitoringInterval, value);
+        }
+
+        public IReadOnlyList<int> MonitoringIntervalOptions { get; } = new List<int>
+        {
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20
+        };
+
+        private int _selectedMonitoringIntervalSeconds = 1;
+        public int SelectedMonitoringIntervalSeconds
+        {
+            get => _selectedMonitoringIntervalSeconds;
+            set
+            {
+                if (SetProperty(ref _selectedMonitoringIntervalSeconds, value))
+                {
+                    ApplyMonitoringInterval(value);
+                }
+            }
+        }
+
+        private string _tb_MonitoringHeartbeat = "Heartbeat: stopped";
+        public string Tb_MonitoringHeartbeat
+        {
+            get => _tb_MonitoringHeartbeat;
+            set => SetProperty(ref _tb_MonitoringHeartbeat, value);
+        }
+
+        private bool _isMonitoringHeartbeatOn = false;
+        public bool IsMonitoringHeartbeatOn
+        {
+            get => _isMonitoringHeartbeatOn;
+            set => SetProperty(ref _isMonitoringHeartbeatOn, value);
+        }
+
+        private string _tb_MonitoringCountdown = "--";
+        public string Tb_MonitoringCountdown
+        {
+            get => _tb_MonitoringCountdown;
+            set => SetProperty(ref _tb_MonitoringCountdown, value);
+        }
+
+        private string _tb_LastCheckedTime = "Last checked: --";
+        public string Tb_LastCheckedTime
+        {
+            get => _tb_LastCheckedTime;
+            set => SetProperty(ref _tb_LastCheckedTime, value);
         }
 
         private string _tb_FolderSize = "-------------";
@@ -85,7 +133,7 @@ namespace FolderPulse
             Btn_ExplorerCMD = new RelayCommand(ExecuteExplorerCMD);
             Btn_ActionCMD = new RelayCommand(ExecuteActionCMD);
 
-            _pollInterval = TimeSpan.FromSeconds(_interval);
+            ApplyMonitoringInterval(SelectedMonitoringIntervalSeconds);
         }
 
         public void Dispose()
@@ -164,10 +212,14 @@ namespace FolderPulse
             _cts = new CancellationTokenSource();
 
             Tb_ActivatedFolder = Tb_SelectedFolderPath;
-            Tb_MonitoringInterval = $"{_pollInterval.TotalSeconds:N1} sec";
+            _remainingSeconds = GetIntervalSeconds();
+            Tb_MonitoringCountdown = _remainingSeconds.ToString();
+            Tb_MonitoringHeartbeat = "Next folder check countdown";
+            IsMonitoringHeartbeatOn = true;
 
             _previousSnapshot = CaptureFolderSnapshot(Tb_ActivatedFolder);
             ApplySnapshotToUi(_previousSnapshot);
+            UpdateLastCheckedTime();
 
             _isMonitoring = true;
             _monitoringTask = RunMonitoringLoopAsync(_cts.Token);
@@ -186,6 +238,9 @@ namespace FolderPulse
             }
 
             Tb_MonitoringInterval = "Stopped";
+            Tb_MonitoringHeartbeat = "Heartbeat: stopped";
+            Tb_MonitoringCountdown = "--";
+            IsMonitoringHeartbeatOn = false;
         }
 
         private async Task RunMonitoringLoopAsync(CancellationToken token)
@@ -194,12 +249,23 @@ namespace FolderPulse
             {
                 try
                 {
-                    await Task.Delay(_pollInterval, token);
+                    await Task.Delay(HeartbeatInterval, token);
 
-                    FolderSnapshot currentSnapshot = CaptureFolderSnapshot(Tb_ActivatedFolder);
-                    ApplySnapshotChanges(_previousSnapshot, currentSnapshot);
+                    _remainingSeconds--;
 
-                    _previousSnapshot = currentSnapshot;
+                    if (_remainingSeconds <= 0)
+                    {
+                        FolderSnapshot currentSnapshot = CaptureFolderSnapshot(Tb_ActivatedFolder);
+                        ApplySnapshotChanges(_previousSnapshot, currentSnapshot);
+
+                        _previousSnapshot = currentSnapshot;
+                        UpdateLastCheckedTime();
+                        _remainingSeconds = GetIntervalSeconds();
+                        UpdateHeartbeat(_remainingSeconds, true);
+                        continue;
+                    }
+
+                    UpdateHeartbeat(_remainingSeconds);
                 }
                 catch (OperationCanceledException)
                 {
@@ -210,6 +276,45 @@ namespace FolderPulse
                     LogEx.Error($"[ERROR] RunMonitoringLoopAsync()-Exception: {ex}");
                 }
             }
+        }
+
+        private void ApplyMonitoringInterval(int seconds)
+        {
+            int intervalSeconds = MonitoringIntervalOptions.Contains(seconds)
+                ? seconds
+                : MonitoringIntervalOptions[0];
+
+            _pollInterval = TimeSpan.FromSeconds(intervalSeconds);
+            Tb_MonitoringInterval = $"{intervalSeconds} sec";
+
+            if (!_isMonitoring)
+            {
+                return;
+            }
+
+            _remainingSeconds = GetIntervalSeconds();
+            Tb_MonitoringCountdown = _remainingSeconds.ToString();
+            Tb_MonitoringHeartbeat = $"Interval changed; next check in {_remainingSeconds} sec";
+        }
+
+        private int GetIntervalSeconds()
+        {
+            return Math.Max(1, (int)Math.Ceiling(_pollInterval.TotalSeconds));
+        }
+
+        private void UpdateHeartbeat(int remainingSeconds, bool checkedNow = false)
+        {
+            IsMonitoringHeartbeatOn = !IsMonitoringHeartbeatOn;
+
+            Tb_MonitoringCountdown = remainingSeconds.ToString();
+            Tb_MonitoringHeartbeat = checkedNow
+                ? $"Checked at {DateTime.Now:HH:mm:ss}; next check in {remainingSeconds} sec"
+                : $"Next folder check in {remainingSeconds} sec";
+        }
+
+        private void UpdateLastCheckedTime()
+        {
+            Tb_LastCheckedTime = $"Last checked: {DateTime.Now:HH:mm:ss}";
         }
 
         private static FolderSnapshot CaptureFolderSnapshot(string folderPath)

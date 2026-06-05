@@ -1,64 +1,183 @@
-﻿<UserControl x:Class="FolderPulse.CtrlFolderPulse"
+<UserControl x:Class="FolderPulse.CtrlFolderPulse"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:local="clr-namespace:FolderPulse"
-             mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center">
-            <Button x:Name="Btn_Explorer" Content="폴더위치 열기" Margin="5" Command="{Binding Btn_ExplorerCMD}">
+             mc:Ignorable="d">
+    <UserControl.Resources>
+        <Style x:Key="LabelTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="#FF64748B"/>
+        </Style>
 
-            </Button>
-            <TextBlock FontSize="12" Text="{Binding Tb_SelectedFolderPath}" TextWrapping="Wrap" Margin="5" />
-            <Button x:Name="Btn_Action" Content="폴더모니터링 활성화" Margin="5" Command="{Binding Btn_ActionCMD}">
+        <Style x:Key="ValueTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#FF0F172A"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
 
-            </Button>
-        </StackPanel>
-        <Grid Grid.Row="1">
+        <Style x:Key="MetricBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FFFFFFFF"/>
+            <Setter Property="BorderBrush" Value="#FFE2E8F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="MinHeight" Value="30"/>
+            <Setter Property="Background" Value="#FF2563EB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#FF1D4ED8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </UserControl.Resources>
+
+    <Border Margin="8,6" Padding="12" Background="#FFF8FAFC" BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="8">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left">
-                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightGreen">
-                    <Run Text="Activated Folder: "/><Run x:Name="tb_ActFolder" FontWeight="Bold" Text="{Binding Tb_ActivatedFolder}"/>
-                </TextBlock>
-            </StackPanel>
-            <Grid Grid.Row="1">
+
+            <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0" x:Name="Btn_Explorer" Content="폴더 선택" Command="{Binding Btn_ExplorerCMD}"/>
+
+                <StackPanel Grid.Column="1" Margin="4,0,12,0">
+                    <TextBlock Style="{StaticResource LabelTextStyle}" Text="Selected Folder"/>
+                    <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_SelectedFolderPath}"/>
+                </StackPanel>
+
+                <Button Grid.Column="2" x:Name="Btn_Action" Content="모니터링 시작/정지" Command="{Binding Btn_ActionCMD}"/>
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="0,10,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource MetricBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Activated Folder"/>
+                        <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_ActivatedFolder}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Style="{StaticResource MetricBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Monitoring Interval"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                            <ComboBox Width="64" MinHeight="26"
+                                      ItemsSource="{Binding MonitoringIntervalOptions}"
+                                      SelectedItem="{Binding SelectedMonitoringIntervalSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Margin="6,5,0,0" Foreground="#FF334155" Text="sec"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" Background="#FFFFFBEB" BorderBrush="#FFFDE68A" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Last Folder Check"/>
+                        <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_LastCheckedTime}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" Orientation="Vertical" HorizontalAlignment="Left">
-                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightCyan">
-                    <Run Text="Monitoring Interval: "/><Run x:Name="tb_MonitoringInterval" FontWeight="Bold" Text="{Binding Tb_MonitoringInterval}"/>
-                    </TextBlock>
-                </StackPanel>
+                <Border Grid.Column="0" Style="{StaticResource MetricBorderStyle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Orientation="Vertical" HorizontalAlignment="Left">
-                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightSalmon">
-                    <Run Text="Folder Size: "/><Run x:Name="tb_FolderSize" FontWeight="Bold" Text="{Binding Tb_FolderSize}"/>
-                    </TextBlock>
-                </StackPanel>
+                        <Grid Grid.Column="0" Width="68" Height="26" Margin="0,0,10,0">
+                            <Path StrokeThickness="2" Stretch="Fill"
+                                  Data="M0,14 L10,14 L16,6 L24,20 L32,10 L40,14 L68,14">
+                                <Path.Style>
+                                    <Style TargetType="Path">
+                                        <Setter Property="Stroke" Value="#FFFCA5A5"/>
+                                        <Setter Property="Opacity" Value="0.4"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMonitoringHeartbeatOn}" Value="True">
+                                                <Setter Property="Opacity" Value="1"/>
+                                                <Setter Property="Stroke" Value="#FFDC2626"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                            <Ellipse Width="8" Height="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#FFCBD5E1"/>
+                                        <Setter Property="Opacity" Value="0.7"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMonitoringHeartbeatOn}" Value="True">
+                                                <Setter Property="Fill" Value="#FFDC2626"/>
+                                                <Setter Property="Opacity" Value="1"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                        </Grid>
 
-                <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Left">
-                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightYellow">
-                    <Run Text="Subfolder Count: "/><Run x:Name="tb_SubFolderCount" FontWeight="Bold" Text="{Binding Tb_SubFolderCount}"/>
-                    </TextBlock>
-                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="5" Background="LightBlue">
-                    <Run Text="TotalFile Count: "/><Run x:Name="tb_FileCount" FontWeight="Bold" Text="{Binding Tb_FileCount}"/>
-                    </TextBlock>
-                </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
+                            <TextBlock FontSize="22" FontWeight="Bold" MinWidth="28" TextAlignment="Right"
+                                       Foreground="#FFDC2626" Text="{Binding Tb_MonitoringCountdown}"/>
+                            <TextBlock FontSize="12" Margin="3,8,0,0" Foreground="#FF475569" Text="sec"/>
+                        </StackPanel>
+
+                        <TextBlock Grid.Column="2" VerticalAlignment="Center" FontSize="12" Foreground="#FF475569"
+                                   TextTrimming="CharacterEllipsis" Text="{Binding Tb_MonitoringHeartbeat}"/>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Column="1" Style="{StaticResource MetricBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Folder Size"/>
+                        <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_FolderSize}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" Style="{StaticResource MetricBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Subfolders"/>
+                        <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_SubFolderCount}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="3" Background="#FFFFFFFF" BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource LabelTextStyle}" Text="Files"/>
+                        <TextBlock Style="{StaticResource ValueTextStyle}" Text="{Binding Tb_FileCount}"/>
+                    </StackPanel>
+                </Border>
             </Grid>
-
         </Grid>
-    </Grid>
+    </Border>
 </UserControl>
